@@ -48,6 +48,16 @@ https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
 
+**Instalation**
+
+~~~bash
+git clone https://github.com/py1tcm/radiosonde_auto_rx.git
+cd radiosonde_auto_rx/auto_rx
+git checkout Telegram
+./build.sh
+cp station.cfg.example station.cfg
+~~~
+
 **For update from existing instalation**
 
 ~~~bash
