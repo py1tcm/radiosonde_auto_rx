@@ -42,6 +42,8 @@ https://groups.google.com/forum/#!forum/radiosonde_auto_rx
 
 ### Telegram bot configuration
 
+**Telegram bot create**
+
 https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api/
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
@@ -49,7 +51,6 @@ You need group TOKEN and CHAT_ID  to configure service on auto-rx
 **For update from existing instalation**
 
 ~~~bash
-
 sudo systemctl stop auto_rx.service
 cd radiosonde_auto_rx/auto_rx
 cp station.cfg station_backup.cfg
