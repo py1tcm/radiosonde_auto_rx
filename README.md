@@ -40,6 +40,45 @@ Improvements from the upstream RS codebase will be merged into this codebase whe
 Please consider joining the Google Group to receive updates on new software features:
 https://groups.google.com/forum/#!forum/radiosonde_auto_rx
 
+### Telegram bot configuration
+
+https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api/
+
+You need group TOKEN and CHAT_ID  to configure service on auto-rx
+
+**For update from existing instalation**
+
+~~~bash
+
+sudo systemctl stop auto_rx.service
+cd radiosonde_auto_rx/auto_rx
+cp station.cfg station_backup.cfg
+
+git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
+git pull
+git checkout Telegram
+~~~
+
+*Configure new parameters*
+
+~~~bash
+"telegram_enabled = True"
+"telegram_bot_token = ???"
+"telegram_chat_id = ???"
+"telegram_landing_enabled = True
+"telegram_landing_lat1 = -2.5083 (latitude do ponto de interesse);
+"telegram_landing_lon1 = -44.2968 (longitude do ponto interesse);
+"telegram_landing_alt1 = 0.0 (altitude do solo da região do ponto de interesse);
+"telegram_landing_distance1 = 50000 (Raio de distancia em metros da LAT/LONG Central);
+"telegram_landing_altitude1 = 5000 (Altura em metros para o alarme de queda);
+~~~
+
+**Testing telegram messages**
+
+~~~bash
+python3 -m autorx.telegram
+~~~
+
 ## Presentations
 * Linux.conf.au 2019 - https://www.youtube.com/watch?v=YBy-bXEWZeM
 * UKHAS Conference 2019 - [Presented via Skype](https://youtu.be/azDJmMywBgw?t=643) which had some audio issues at the start. Slides [here](https://rfhead.net/sondes/auto_rx_presentation_UKHAS2019.pdf).
