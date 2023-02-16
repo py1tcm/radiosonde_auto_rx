@@ -4,7 +4,7 @@
 
 **config.py**
 
-above line 85 (# SDR Settings) insert:
+above line 68 (# SDR Settings) insert:
 
 ~~~bash
 # Telegram Settings
@@ -21,7 +21,7 @@ above line 85 (# SDR Settings) insert:
 
 ~~~
 
-above line 265 (# SDR Settings) insert:
+above line 226 (# SDR Settings) insert:
 
 ~~~bash
         # Telegram Settings
@@ -50,14 +50,14 @@ above line 265 (# SDR Settings) insert:
 
 **auto_rx.py**
 
-above line 32 (from autorx.habitat import HabitatUploader) insert:
+above line 31 (from autorx.habitat import HabitatUploader) insert:
 
 ~~~bash
 from autorx.telegram import TelegramNotification
 
 ~~~
 
-above line 927 (if config["email_enabled"]:) insert:
+above line 881 (if config["email_enabled"]:) insert:
 
 ~~~bash
    if config["telegram_enabled"]:
@@ -79,7 +79,7 @@ above line 927 (if config["email_enabled"]:) insert:
 
 **station.cfg.example**
 
-above line 430 (# ROTATOR CONTROL #) insert:
+above line 410 (# ROTATOR CONTROL #) insert:
 
 ~~~bash
 ##########################
