@@ -1,6 +1,6 @@
 ###Mods for insert Telegram bot on current release
 
-*Insert file telegram.py in /radiosonde_auto_rx/auto_rx/autorx*
+*Insert file telegram.py (https://github.com/py1tcm/radiosonde_auto_rx/blob/Telegram/auto_rx/autorx/telegram.py) in /radiosonde_auto_rx/auto_rx/autorx*
 
 **config.py**
 
