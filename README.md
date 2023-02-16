@@ -48,7 +48,7 @@ https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
 
-**Instalation**
+**New instalation**
 
 ~~~bash
 git clone https://github.com/py1tcm/radiosonde_auto_rx.git
