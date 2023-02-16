@@ -58,7 +58,7 @@ git checkout Telegram
 cp station.cfg.example station.cfg
 ~~~
 
-**For update from existing instalation**
+**Update from existing instalation**
 
 ~~~bash
 sudo systemctl stop auto_rx.service
