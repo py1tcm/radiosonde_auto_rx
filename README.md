@@ -77,15 +77,15 @@ nano station.cfg
 *Configure new parameters*
 
 ~~~bash
-"telegram_enabled = True"
-"telegram_bot_token = ???"
-"telegram_chat_id = ???"
-"telegram_landing_enabled = True
-"telegram_landing_lat1 = -2.5083 (latitude do ponto de interesse);
-"telegram_landing_lon1 = -44.2968 (longitude do ponto interesse);
-"telegram_landing_alt1 = 0.0 (altitude do solo da região do ponto de interesse);
-"telegram_landing_distance1 = 50000 (Raio de distancia em metros da LAT/LONG Central);
-"telegram_landing_altitude1 = 5000 (Altura em metros para o alarme de queda);
+telegram_enabled = True
+telegram_bot_token = ??? (from bot config)
+telegram_chat_id = ??? (from bot config)
+telegram_landing_enabled = True
+telegram_landing_lat1 = -2.5083 (latitude of interest point)
+telegram_landing_lon1 = -44.2968 (longitude of interest point)
+telegram_landing_alt1 = 0.0 (ground altitude of interest point region)
+telegram_landing_distance1 = 50000 (Distance radius in meters from central LAT/LONG)
+telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
 ~~~
 
 **Testing telegram messages**
