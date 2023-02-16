@@ -48,7 +48,7 @@ https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
 
-**Instalation**
+**New instalation**
 
 ~~~bash
 git clone https://github.com/py1tcm/radiosonde_auto_rx.git
@@ -56,9 +56,10 @@ cd radiosonde_auto_rx/auto_rx
 git checkout Telegram
 ./build.sh
 cp station.cfg.example station.cfg
+nano station.cfg
 ~~~
 
-**For update from existing instalation**
+**Update from existing instalation**
 
 ~~~bash
 sudo systemctl stop auto_rx.service
@@ -68,6 +69,7 @@ cp station.cfg station_backup.cfg
 git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
 git pull
 git checkout Telegram
+./build.sh
 cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
@@ -75,15 +77,15 @@ nano station.cfg
 *Configure new parameters*
 
 ~~~bash
-"telegram_enabled = True"
-"telegram_bot_token = ???"
-"telegram_chat_id = ???"
-"telegram_landing_enabled = True
-"telegram_landing_lat1 = -2.5083 (latitude do ponto de interesse);
-"telegram_landing_lon1 = -44.2968 (longitude do ponto interesse);
-"telegram_landing_alt1 = 0.0 (altitude do solo da região do ponto de interesse);
-"telegram_landing_distance1 = 50000 (Raio de distancia em metros da LAT/LONG Central);
-"telegram_landing_altitude1 = 5000 (Altura em metros para o alarme de queda);
+telegram_enabled = True
+telegram_bot_token = TOKEN (from bot config)
+telegram_chat_id = CHAT_ID (from bot config)
+telegram_landing_enabled = True
+telegram_landing_lat1 = -2.5083 (latitude of interest point)
+telegram_landing_lon1 = -44.2968 (longitude of interest point)
+telegram_landing_alt1 = 0.0 (ground altitude of interest point region)
+telegram_landing_distance1 = 50000 (Distance radius in meters from central LAT/LONG)
+telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
 ~~~
 
 **Testing telegram messages**
