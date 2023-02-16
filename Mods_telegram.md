@@ -1,4 +1,4 @@
-###Mods for insert Telegram bot on current release
+### Mods for insert Telegram bot on current release ###
 
 *Insert file telegram.py (https://github.com/py1tcm/radiosonde_auto_rx/blob/Telegram/auto_rx/autorx/telegram.py) in /radiosonde_auto_rx/auto_rx/autorx*
 
@@ -77,7 +77,7 @@ above line 881 (if config["email_enabled"]:) insert:
 
 ~~~
 
-**station.cfg.example**
+**station.cfg / station.cfg.example**
 
 above line 410 (# ROTATOR CONTROL #) insert:
 
