@@ -78,8 +78,8 @@ nano station.cfg
 
 ~~~bash
 telegram_enabled = True
-telegram_bot_token = ??? (from bot config)
-telegram_chat_id = ??? (from bot config)
+telegram_bot_token = TOKEN (from bot config)
+telegram_chat_id = CHAT_ID (from bot config)
 telegram_landing_enabled = True
 telegram_landing_lat1 = -2.5083 (latitude of interest point)
 telegram_landing_lon1 = -44.2968 (longitude of interest point)
