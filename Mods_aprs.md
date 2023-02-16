@@ -1,5 +1,5 @@
 
-###Mods for bypass aprs inibith on current release
+###Mods to bypass aprs inhibition on current release
 
 **config.py**
 
