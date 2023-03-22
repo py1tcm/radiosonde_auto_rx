@@ -41,7 +41,7 @@ Please consider joining the Google Group to receive updates on new software feat
 https://groups.google.com/forum/#!forum/radiosonde_auto_rx
 
 # Based on telegram bot configuration by Gustavo PR8KW 
-**(https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram) **
+**https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram**
 
 ###Thanks for great job!!
 
