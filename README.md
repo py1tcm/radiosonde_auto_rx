@@ -40,7 +40,10 @@ Improvements from the upstream RS codebase will be merged into this codebase whe
 Please consider joining the Google Group to receive updates on new software features:
 https://groups.google.com/forum/#!forum/radiosonde_auto_rx
 
-# Based on telegram bot configuration by Gustavo PR8KW (https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram) Thanks for great job!!
+# Based on telegram bot configuration by Gustavo PR8KW 
+**(https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram) **
+
+###Thanks for great job!!
 
 ### Telegram bot configuration
 
