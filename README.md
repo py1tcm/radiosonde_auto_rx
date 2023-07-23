@@ -84,13 +84,13 @@ cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
 
-**Python Dependecies**
+**Python Dependencies**
 
 ~~~bash
 sudo pip3 install -r requirements.txt
 ~~~
 
-In case of *error: externally-managed-environment* (on debian 12 occurs)
+*In case of *error: externally-managed-environment* (on debian 12 occurs)*
 
 ~~~bash
 sudo pip3 install -r requirements.txt --break-system-packages
