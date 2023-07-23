@@ -126,7 +126,7 @@ cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
 
-#Initial testing
+# Initial testing
 
 ~~~bash
 python3 auto_rx.py
@@ -138,7 +138,7 @@ python3 auto_rx.py
 python3 -m autorx.telegram
 ~~~
 
-#Automatic startup on system boot
+# Automatic startup on system boot
 
 ~~~bash
 sudo cp auto_rx.service /etc/systemd/system/
