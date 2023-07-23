@@ -52,27 +52,30 @@ https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram
 https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api/
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
+#New instalation
 
-**New instalation**
+**software dependencies**
+
+~~~bash
+sudo apt update
+sudo apt dist-upgrade
+sudo apt install python3 python3-numpy python3-setuptools python3-crcmod python3-requests python3-dateutil python3-pip python3-flask sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5
+~~~
+
+**RTL-SDR**
+~~~bash
+sudo apt install rtl-sdr
+sudo wget -O /etc/udev/rules.d/20-rtlsdr.rules https://raw.githubusercontent.com/osmocom/rtl-sdr/master/rtl-sdr.rules
+~~~
+
+Reboot equipment
+
+
+**Clonig repository**
 
 ~~~bash
 git clone https://github.com/py1tcm/radiosonde_auto_rx.git
 cd radiosonde_auto_rx/auto_rx
-git checkout Telegram
-./build.sh
-cp station.cfg.example station.cfg
-nano station.cfg
-~~~
-
-**Update from existing instalation**
-
-~~~bash
-sudo systemctl stop auto_rx.service
-cd radiosonde_auto_rx/auto_rx
-cp station.cfg station_backup.cfg
-
-git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
-git pull
 git checkout Telegram
 ./build.sh
 cp station.cfg.example station.cfg
@@ -91,6 +94,22 @@ telegram_landing_lon1 = -44.2968 (longitude of interest point)
 telegram_landing_alt1 = 0.0 (ground altitude of interest point region)
 telegram_landing_distance1 = 50000 (Distance radius in meters from central LAT/LONG)
 telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
+~~~
+
+
+#Update from existing instalation
+
+~~~bash
+sudo systemctl stop auto_rx.service
+cd radiosonde_auto_rx/auto_rx
+cp station.cfg station_backup.cfg
+
+git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
+git pull
+git checkout Telegram
+./build.sh
+cp station.cfg.example station.cfg
+nano station.cfg
 ~~~
 
 **Testing telegram messages**
