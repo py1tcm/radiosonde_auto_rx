@@ -79,7 +79,7 @@ git clone https://github.com/py1tcm/radiosonde_auto_rx.git
 cd radiosonde_auto_rx/auto_rx
 git checkout Telegram
 ./build.sh
-sudo pip3 install -r requirements.txt --break-system-packages
+sudo pip3 install -r requirements.txt *or* sudo pip3 install -r requirements.txt --break-system-packages (in case of *error: externally-managed-environment*)
 cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
