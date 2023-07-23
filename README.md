@@ -60,7 +60,7 @@ You need group TOKEN and CHAT_ID  to configure service on auto-rx
 ~~~bash
 sudo apt update
 sudo apt dist-upgrade
-sudo apt install python3 python3-numpy python3-setuptools python3-crcmod python3-requests python3-dateutil python3-pip python3-flask sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5
+sudo apt install python3 python3-numpy python3-setuptools python3-crcmod python3-requests python3-dateutil python3-pip python3-flask python3-flask-socketio python3-semver sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5
 ~~~
 
 **RTL-SDR**
@@ -79,9 +79,13 @@ git clone https://github.com/py1tcm/radiosonde_auto_rx.git
 cd radiosonde_auto_rx/auto_rx
 git checkout Telegram
 ./build.sh
+sudo pip3 install -r requirements.txt --break-system-packages
 cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
+
+
+
 
 *Configure new parameters*
 
