@@ -72,7 +72,7 @@ sudo wget -O /etc/udev/rules.d/20-rtlsdr.rules https://raw.githubusercontent.com
 Reboot equipment
 
 
-**Clonig repository**
+**Cloning repository**
 
 ~~~bash
 git clone https://github.com/py1tcm/radiosonde_auto_rx.git
