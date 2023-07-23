@@ -79,7 +79,6 @@ git clone https://github.com/py1tcm/radiosonde_auto_rx.git
 cd radiosonde_auto_rx/auto_rx
 git checkout Telegram
 ./build.sh
-sudo pip3 install -r requirements.txt *or* sudo pip3 install -r requirements.txt --break-system-packages (in case of *error: externally-managed-environment*)
 cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
@@ -127,10 +126,42 @@ cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
 
+#Initial testing
+
+~~~bash
+python3 auto_rx.py
+~~~
+
 **Testing telegram messages**
 
 ~~~bash
 python3 -m autorx.telegram
+~~~
+
+#Automatic startup on system boot
+
+~~~bash
+sudo cp auto_rx.service /etc/systemd/system/
+sudo nano /etc/systemd/system/auto_rx.service
+~~~
+
+*If you are not running auto_rx as the 'pi' user, you will need to edit the auto_rx.service file and modify the `ExecStart`, `WorkingDirectory` and `User` fields*
+
+~~~bash
+[Unit]
+Description=auto_rx
+After=syslog.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/radiosonde_auto_rx/auto_rx/auto_rx.py -t 0
+Restart=always
+RestartSec=120
+WorkingDirectory=/home/pi/radiosonde_auto_rx/auto_rx/
+User=pi
+SyslogIdentifier=auto_rx
+
+[Install]
+WantedBy=multi-user.target
 ~~~
 
 ## Presentations
