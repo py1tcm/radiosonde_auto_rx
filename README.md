@@ -110,22 +110,6 @@ telegram_landing_distance1 = 50000 (Distance radius in meters from central LAT/L
 telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
 ~~~
 
-
-# Update from existing instalation
-
-~~~bash
-sudo systemctl stop auto_rx.service
-cd radiosonde_auto_rx/auto_rx
-cp station.cfg station_backup.cfg
-
-git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
-git pull
-git checkout Telegram
-./build.sh
-cp station.cfg.example station.cfg
-nano station.cfg
-~~~
-
 # Initial testing
 
 ~~~bash
@@ -162,6 +146,22 @@ SyslogIdentifier=auto_rx
 
 [Install]
 WantedBy=multi-user.target
+~~~
+
+
+# Update from existing instalation
+
+~~~bash
+sudo systemctl stop auto_rx.service
+cd radiosonde_auto_rx/auto_rx
+cp station.cfg station_backup.cfg
+
+git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
+git pull
+git checkout Telegram
+./build.sh
+cp station.cfg.example station.cfg
+nano station.cfg
 ~~~
 
 ## Presentations
