@@ -52,7 +52,8 @@ https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram
 https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api/
 
 You need group TOKEN and CHAT_ID  to configure service on auto-rx
-#New instalation
+
+# New instalation
 
 **software dependencies**
 
@@ -97,7 +98,7 @@ telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
 ~~~
 
 
-#Update from existing instalation
+# Update from existing instalation
 
 ~~~bash
 sudo systemctl stop auto_rx.service
