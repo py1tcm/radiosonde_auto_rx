@@ -148,6 +148,12 @@ SyslogIdentifier=auto_rx
 WantedBy=multi-user.target
 ~~~
 
+**Enable and starting service**
+
+~~~bash
+sudo systemctl enable auto_rx.service
+sudo systemctl start auto_rx.service
+~~~
 
 # Update from existing instalation
 
