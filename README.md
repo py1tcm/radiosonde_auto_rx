@@ -163,7 +163,6 @@ cp station.cfg station_backup.cfg
 
 git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
 git pull
-git checkout Telegram
 ./build.sh
 cp station.cfg.example station.cfg
 nano station.cfg
