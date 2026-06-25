@@ -504,7 +504,8 @@ class APRSUploader(object):
             # If we are emulating an IGATE, then we need to add in a path, a q-construct, and our own callsign.
             # We have the TOCALL field 'APRARX' allocated by Bob WB4APR, so we can now use this to indicate
             # that these packets have arrived via radiosonde_auto_rx!
-            _packet = "%s>APRARX,SONDEGATE,TCPIP,qAR,%s:%s\r\n" % (
+            # TOCALL modified to APRS to bypass aprs.fi filtering. 02/09/2022
+            _packet = "%s>APRS,SONDEGATE,TCPIP,qAR,%s:%s\r\n" % (
                 source,
                 self.aprs_callsign,
                 packet,

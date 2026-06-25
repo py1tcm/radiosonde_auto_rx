@@ -40,7 +40,135 @@ Improvements from the upstream RS codebase will be merged into this codebase whe
 Please consider joining the Google Group to receive updates on new software features:
 https://groups.google.com/forum/#!forum/radiosonde_auto_rx
 
-We also have a channel in the SondeHub Discord server: https://sondehub.org/go/discord
+# Based on telegram bot configuration by Gustavo PR8KW 
+https://github.com/PR8KW/radiosonde_auto_rx/tree/Telegram
+
+**Thanks for great job!!**
+
+### Telegram bot configuration
+
+**Telegram bot create**
+
+https://www.techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api/
+
+You need group TOKEN and CHAT_ID  to configure service on auto-rx
+
+# New instalation
+
+**software dependencies**
+
+~~~bash
+sudo apt update
+sudo apt dist-upgrade
+sudo apt install python3 python3-numpy python3-setuptools python3-crcmod python3-requests python3-dateutil python3-pip python3-flask python3-flask-socketio python3-semver sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5
+~~~
+
+**RTL-SDR**
+~~~bash
+sudo apt install rtl-sdr
+sudo wget -O /etc/udev/rules.d/20-rtlsdr.rules https://raw.githubusercontent.com/osmocom/rtl-sdr/master/rtl-sdr.rules
+~~~
+
+Reboot equipment
+
+
+**Cloning repository**
+
+~~~bash
+git clone https://github.com/py1tcm/radiosonde_auto_rx.git
+cd radiosonde_auto_rx/auto_rx
+git checkout Telegram
+./build.sh
+cp station.cfg.example station.cfg
+nano station.cfg
+~~~
+
+**Python Dependencies**
+
+~~~bash
+sudo pip3 install -r requirements.txt
+~~~
+
+*In case of *error: externally-managed-environment* (on debian 12 occurs)*
+
+~~~bash
+sudo pip3 install -r requirements.txt --break-system-packages
+~~~
+
+
+*Configure new parameters*
+
+~~~bash
+telegram_enabled = True
+telegram_bot_token = TOKEN (from bot config)
+telegram_chat_id = CHAT_ID (from bot config)
+telegram_landing_enabled = True
+telegram_landing_lat1 = -2.5083 (latitude of interest point)
+telegram_landing_lon1 = -44.2968 (longitude of interest point)
+telegram_landing_alt1 = 0.0 (ground altitude of interest point region)
+telegram_landing_distance1 = 50000 (Distance radius in meters from central LAT/LONG)
+telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
+~~~
+
+# Initial testing
+
+~~~bash
+python3 auto_rx.py
+~~~
+
+**Testing telegram messages**
+
+~~~bash
+python3 -m autorx.telegram
+~~~
+
+# Automatic startup on system boot
+
+~~~bash
+sudo cp auto_rx.service /etc/systemd/system/
+sudo nano /etc/systemd/system/auto_rx.service
+~~~
+
+*If you are not running auto_rx as the 'pi' user, you will need to edit the auto_rx.service file and modify the `ExecStart`, `WorkingDirectory` and `User` fields*
+
+~~~bash
+[Unit]
+Description=auto_rx
+After=syslog.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/radiosonde_auto_rx/auto_rx/auto_rx.py -t 0
+Restart=always
+RestartSec=120
+WorkingDirectory=/home/pi/radiosonde_auto_rx/auto_rx/
+User=pi
+SyslogIdentifier=auto_rx
+
+[Install]
+WantedBy=multi-user.target
+~~~
+
+**Enable and starting service**
+
+~~~bash
+sudo systemctl enable auto_rx.service
+sudo systemctl start auto_rx.service
+~~~
+
+# Update from existing instalation
+
+~~~bash
+sudo systemctl stop auto_rx.service
+cd radiosonde_auto_rx/auto_rx
+cp station.cfg station_backup.cfg
+
+git remote set-url origin https://github.com/py1tcm/radiosonde_auto_rx.git
+git pull
+git checkout Telegram
+./build.sh
+cp station.cfg.example station.cfg
+nano station.cfg
+~~~
 
 ## Presentations
 * Linux.conf.au 2019 - https://www.youtube.com/watch?v=YBy-bXEWZeM
