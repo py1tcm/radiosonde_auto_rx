@@ -60,7 +60,7 @@ You need group TOKEN and CHAT_ID  to configure service on auto-rx
 ~~~bash
 sudo apt update
 sudo apt dist-upgrade
-sudo apt install python3 python3-numpy python3-setuptools python3-crcmod python3-requests python3-dateutil python3-pip python3-flask python3-flask-socketio python3-semver sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5
+sudo apt install python3 python3-venv sox git build-essential libtool cmake usbutils libusb-1.0-0-dev rng-tools libsamplerate-dev libatlas3-base libgfortran5 libopenblas-dev rtl-sdr
 ~~~
 
 **RTL-SDR**
@@ -81,19 +81,29 @@ cd radiosonde_auto_rx/auto_rx
 cp station.cfg.example station.cfg
 nano station.cfg
 ~~~
+**Setting up a Python Virtual Environment**
 
-**Python Dependencies**
+We now need to get all the Python packages we need to run auto_rx. We will be setting up a Python Virtual Environment ('venv') to do this, to avoid 'polluting' system-wide packages.
 
-~~~bash
-sudo pip3 install -r requirements.txt
-~~~
-
-*In case of *error: externally-managed-environment* (on debian 12 occurs)*
+The following commands need to be run within the ~/radiosonde_auto_rx/auto_rx directory:
 
 ~~~bash
-sudo pip3 install -r requirements.txt --break-system-packages
+cd ~/radiosonde_auto_rx/auto_rx/
+python3 -m venv venv
+source venv/bin/activate
+(venv) pip install -r requirements.txt
 ~~~
 
+A few warnings may be shown while pip does it's thing. The packages we need should still be installed however.
+
+From now on, before attempting to run any auto_rx Python scripts, ensure you are operating within the Virtual Environment we just created. You can confirm this by running:
+
+~~~bash
+cd ~/radiosonde_auto_rx/auto_rx/
+source venv/bin/activate
+~~~
+
+Your terminal should have a (venv) prefix, which indicates you are operating within the venv.
 
 *Configure new parameters*
 
@@ -112,13 +122,14 @@ telegram_landing_altitude1 = 5000 (Height in meters for the fall alarm)
 # Initial testing
 
 ~~~bash
-python3 auto_rx.py
+(from within radiosonde_auto_rx/auto_rx, and within the virtual environment we just setup)
+(venv) python3 auto_rx.py
 ~~~
 
 **Testing telegram messages**
 
 ~~~bash
-python3 -m autorx.telegram
+(venv) python3 -m autorx.telegram
 ~~~
 
 # Automatic startup on system boot
