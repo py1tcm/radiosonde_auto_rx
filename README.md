@@ -77,7 +77,6 @@ Reboot equipment
 ~~~bash
 git clone https://github.com/py1tcm/radiosonde_auto_rx.git
 cd radiosonde_auto_rx/auto_rx
-git checkout Telegram
 ./build.sh
 cp station.cfg.example station.cfg
 nano station.cfg
