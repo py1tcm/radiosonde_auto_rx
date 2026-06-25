@@ -19,6 +19,8 @@ import threading
 import time
 import numpy as np
 import semver
+import shutil
+import sys
 from dateutil.parser import parse
 from datetime import datetime, timedelta
 from math import radians, degrees, sin, cos, atan2, sqrt, pi
@@ -42,11 +44,27 @@ REQUIRED_RS_UTILS = [
     "m20mod",
     "imet4iq",
     "mts01mod",
-    "iq_dec"
+    "iq_dec",
+    "weathex301d"
 ]
 
+_timeout_cmd = None
 
-def check_rs_utils():
+def timeout_cmd():
+    global _timeout_cmd
+    if not _timeout_cmd:
+        t=shutil.which("gtimeout")
+        if t:
+            _timeout_cmd = "gtimeout -k 30 "
+        else:
+            if not shutil.which("timeout"):
+                logging.critical("timeout command-line tool not present in system. try installing gtimeout.")
+                sys.exit(1)
+            else:
+                _timeout_cmd = "timeout -k 30 "
+    return _timeout_cmd
+
+def check_rs_utils(config):
     """ Check the required RS decoder binaries exist
         Currently we just check there is a file present - we don't check functionality.
     """
@@ -54,6 +72,7 @@ def check_rs_utils():
         if not os.path.isfile(_file):
             logging.critical("Binary %s does not exist - did you run build.sh?" % _file)
             return False
+        _ = timeout_cmd()
 
     return True
 
@@ -142,7 +161,7 @@ def strip_sonde_serial(serial):
     """ Strip off any leading sonde type that may be present in a serial number """
 
     # Look for serials with prefixes matching the following known sonde types.
-    _re = re.compile("^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|LMS6|IMS100|RS11G|MTS01)-")
+    _re = re.compile("^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|LMS6|IMS100|RS11G|MTS01|WXR)-")
 
     # If we have a match, return the trailing part of the serial, re-adding
     # any - separators if they exist.
@@ -168,6 +187,8 @@ def short_type_lookup(type_name):
             return "Vaisala " + type_name
     elif type_name.startswith("DFM"):
         return "Graw " + type_name
+    elif type_name == "PS15":
+        return "Graw PS15"
     elif type_name.startswith("M10"):
         return "Meteomodem M10"
     elif type_name.startswith("M20"):
@@ -178,6 +199,8 @@ def short_type_lookup(type_name):
         return "Lockheed Martin LMS6-1680"
     elif type_name == "IMET":
         return "Intermet Systems iMet-1/4"
+    elif type_name == "IMET-XDATA":
+        return "Intermet Systems iMet-1/4 + XDATA"
     elif type_name == "IMET5":
         return "Intermet Systems iMet-5x"
     elif type_name == "MEISEI":
@@ -190,6 +213,14 @@ def short_type_lookup(type_name):
         return "Meteo-Radiy MRZ"
     elif type_name == "MTS01":
         return "Meteosis MTS01"
+    elif type_name == "WXR301":
+        return "Weathex WxR-301D"
+    elif type_name == "WXRPN9":
+        return "Weathex WxR-301D (PN9 Variant)"
+    elif type_name == "RD41":
+        return "Vaisala RD41 Dropsonde"
+    elif type_name == "RD94":
+        return "Vaisala RD94 Dropsonde"
     else:
         return "Unknown"
 
@@ -218,6 +249,8 @@ def short_short_type_lookup(type_name):
         return "LMS6-1680"
     elif type_name == "IMET":
         return "iMet-1/4"
+    elif type_name == "IMET-XDATA":
+        return "iMet-1/4"
     elif type_name == "IMET5":
         return "iMet-5x"
     elif type_name == "MEISEI":
@@ -230,6 +263,16 @@ def short_short_type_lookup(type_name):
         return "MRZ"
     elif type_name == "MTS01":
         return "MTS01"
+    elif type_name == "WXR301":
+        return "WXR301"
+    elif type_name == "WXRPN9":
+        return "WXR301(PN9)"
+    elif type_name == "PS15":
+        return "PS15"
+    elif type_name == "RD41":
+        return "RD41"
+    elif type_name == "RD94":
+        return "RD94"
     else:
         return "Unknown"
 
@@ -243,7 +286,7 @@ def generate_aprs_id(sonde_data):
         if ("RS92" in sonde_data["type"]) or ("RS41" in sonde_data["type"]):
             # We can use the Vaisala sonde ID directly.
             _object_name = sonde_data["id"].strip()
-        elif "DFM" in sonde_data["type"]:
+        elif "DFM" in sonde_data["type"] or "PS15" in sonde_data["type"]:
             # As per agreement with other radiosonde decoding software developers, we will now
             # use the DFM serial number verbatim in the APRS ID, prefixed with 'D'.
             # For recent DFM sondes, this will result in a object ID of: Dyynnnnnn
@@ -257,9 +300,6 @@ def generate_aprs_id(sonde_data):
 
             # Create the object name
             _object_name = "D%d" % _dfm_id
-
-            # Convert to upper-case hex, and take the last 5 nibbles.
-            _id_suffix = hex(_dfm_id).upper()[-5:]
 
         elif "M10" in sonde_data["type"]:
             # Use the generated id same as dxlAPRS
@@ -284,6 +324,12 @@ def generate_aprs_id(sonde_data):
             _id_suffix = int(sonde_data["id"].split("-")[1])
             _id_hex = hex(_id_suffix).upper()
             _object_name = "LMS6" + _id_hex[-5:]
+        
+        elif "WXR" in sonde_data["type"]:
+            # Use the last 6 hex digits of the sonde ID.
+            _id_suffix = int(sonde_data["id"].split("-")[1])
+            _id_hex = hex(_id_suffix).upper()
+            _object_name = "WXR" + _id_hex[-6:]
 
         elif "MEISEI" in sonde_data["type"] or "IMS100" in sonde_data["type"] or "RS11G" in sonde_data["type"]:
             # Convert the serial number to an int
@@ -329,24 +375,6 @@ def generate_aprs_id(sonde_data):
             _object_name = _object_name + " " * (9 - len(_object_name))
 
         return _object_name
-
-
-def readable_timedelta(duration: timedelta):
-    """
-    Convert a timedelta into a readable string.
-    From: https://codereview.stackexchange.com/a/245215
-    """
-    data = {}
-    data["months"], remaining = divmod(duration.total_seconds(), 2_592_000)
-    data["days"], remaining = divmod(remaining, 86_400)
-    data["hours"], remaining = divmod(remaining, 3_600)
-    data["minutes"], _foo = divmod(remaining, 60)
-
-    time_parts = [f"{round(value)} {name}" for name, value in data.items() if value > 0]
-    if time_parts:
-        return " ".join(time_parts)
-    else:
-        return "below 1 second"
 
 
 class AsynchronousFileReader(threading.Thread):
@@ -699,7 +727,7 @@ def lsusb():
 
         depth = 1 + len(indent_match.group(1)) / 2
         if depth > len(depth_stack):
-            logging.debug('lsusb parsing error: unexpected indentation: "%s"', line)
+            #logging.debug('lsusb parsing error: unexpected indentation: "%s"', line)
             continue
 
         while depth < len(depth_stack):
@@ -724,7 +752,7 @@ def lsusb():
             depth_stack.append(new_entry)
             continue
 
-        logging.debug('lsusb parsing error: unrecognized line: "%s"', line)
+        #logging.debug('lsusb parsing error: unrecognized line: "%s"', line)
 
     if device:
         devices.append(device)
@@ -758,8 +786,10 @@ def reset_usb(bus, device):
         try:
             fcntl.ioctl(usb_file, _USBDEVFS_RESET)
 
-        except IOError:
-            logging.error("RTLSDR - USB Reset Failed.")
+        # This was just catching IOError, just catch everything and print.
+        except Exception as e:
+            logging.error(f"RTLSDR - USB Reset Failed - {str(e)}")
+
 
 
 def is_rtlsdr(vid, pid):
@@ -776,10 +806,10 @@ def is_rtlsdr(vid, pid):
 def reset_rtlsdr_by_serial(serial):
     """ Attempt to reset a RTLSDR with a provided serial number """
 
-    # If not Linux, return immediately.
+    # If not Linux, raise exception and let auto_rx.py convert it to exit status code.
     if is_not_linux():
         logging.debug("RTLSDR - Not a native Linux system, skipping reset attempt.")
-        return
+        raise SystemError("SDR unresponsive")
 
     lsusb_info = lsusb()
     bus_num = None
@@ -853,10 +883,10 @@ def find_rtlsdr(serial=None):
 def reset_all_rtlsdrs():
     """ Reset all RTLSDR devices found in the lsusb tree """
 
-    # If not Linux, return immediately.
+    # If not Linux, raise exception and let auto_rx.py convert it to exit status code.
     if is_not_linux():
         logging.debug("RTLSDR - Not a native Linux system, skipping reset attempt.")
-        return
+        raise SystemError("SDR unresponsive")
 
     lsusb_info = lsusb()
     bus_num = None
@@ -906,11 +936,12 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
         logging.debug("RTLSDR - TCP Device, skipping RTLSDR test step.")
         return True
 
-    _rtl_cmd = "timeout 5 %s -d %s -n 200000 - > /dev/null" % (
+    _rtl_cmd = "%s 5 %s -d %s -f 400000000 -n 200000 - > /dev/null" % (
+        timeout_cmd(),
         rtl_sdr_path,
         str(device_idx),
     )
-
+    
     # First, check if the RTLSDR with a provided serial number is present.
     if device_idx == "0":
         # Check for the presence of any RTLSDRs.
@@ -934,12 +965,19 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
     while _rtlsdr_retries > 0:
         try:
             FNULL = open(os.devnull, "w")  # Inhibit stderr output
+            logging.debug(f"Testing RTLSDR with command: {_rtl_cmd}")
             _ret_code = subprocess.check_call(_rtl_cmd, shell=True, stderr=FNULL)
             FNULL.close()
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             # This exception means the subprocess has returned an error code of one.
-            # This indicates either the RTLSDR doesn't exist, or
-            pass
+            # This indicates either the RTLSDR doesn't exist, or some other error.
+            if e.returncode == 127:
+                # 127 = File not found
+                logging.critical("rtl_sdr utilities (rtl_sdr, rtl_fm, rtl_power) not found!")
+                return False
+            else:
+                logging.warning(f"rtl_sdr test call resulted in return code of {e.returncode}.")
+                pass
         else:
             # rtl-sdr returned OK. We can return True now.
             time.sleep(1)
@@ -954,7 +992,7 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
 
         # Decrement out retry count, then wait a bit before looping
         _rtlsdr_retries -= 1
-        time.sleep(2)
+        time.sleep(5)
 
     # If we run out of retries, clearly the RTLSDR isn't working.
     logging.error(
@@ -1046,36 +1084,6 @@ def position_info(listener, balloon):
         "elevation": degrees(elevation),
         "elevation_radians": elevation,
     }
-
-
-def peak_decimation(freq, power, factor):
-    """ Peak-preserving Decimation.
-
-    Args:
-        freq (list): Frequency Data.
-        power (list): Power data.
-        factor (int): Decimation factor.
-
-    Returns:
-        tuple: (freq, power)
-    """
-
-    _out_len = len(freq) // factor
-
-    _freq_out = []
-    _power_out = []
-
-    try:
-        for i in range(_out_len):
-            _f_slice = freq[i * factor : i * factor + factor]
-            _p_slice = power[i * factor : i * factor + factor]
-
-            _freq_out.append(_f_slice[np.argmax(_p_slice)])
-            _power_out.append(_p_slice.max())
-    except:
-        pass
-
-    return (_freq_out, _power_out)
 
 
 if __name__ == "__main__":

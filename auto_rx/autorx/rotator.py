@@ -134,6 +134,7 @@ class Rotator(object):
         rotator_homing_enabled=False,
         rotator_homing_delay=10,
         rotator_home_position=[0.0, 0.0],
+        azimuth_only=False
     ):
         """ Start a new Rotator Control object. 
 
@@ -151,6 +152,7 @@ class Rotator(object):
                 and whenever no telemetry has been observed for <rotator_homing_delay> minutes.
             rotator_homing_delay (int): Move the rotator to a home position if no telemetry is received within X minutes.
             rotator_home_position (tuple): Rotator home position, as an [azimuth, elevation] list, in degrees (true).
+            azimuth_only (bool): If set, force all elevation data to 0.
 
         """
 
@@ -163,11 +165,16 @@ class Rotator(object):
         self.rotator_homing_enabled = rotator_homing_enabled
         self.rotator_homing_delay = rotator_homing_delay
         self.rotator_home_position = rotator_home_position
+        self.azimuth_only = azimuth_only
 
         # Latest telemetry.
         self.latest_telemetry = None
         self.latest_telemetry_time = 0
+        self.last_telemetry_time = 0
         self.telem_lock = Lock()
+
+        # Homing state
+        self.rotator_homed = False
 
         # Input Queue.
         self.input_queue = Queue()
@@ -186,6 +193,11 @@ class Rotator(object):
             if _field not in telemetry:
                 self.log_error("JSON object missing required field %s" % _field)
                 return
+
+        # Discard encrypted sonde data silently
+        if 'encrypted' in telemetry:
+            if telemetry['encrypted']:
+                return None
 
         # Update the latest telemetry store.
         self.telem_lock.acquire()
@@ -215,7 +227,17 @@ class Rotator(object):
         _curr_az = _pos[0] % 360.0
         _curr_el = _pos[1]
 
-        if (abs(azimuth - _curr_az) > self.rotator_update_threshold) or (
+        _azimuth_diff = abs(azimuth - _curr_az)
+        if (_azimuth_diff > 180.0):
+            _azimuth_diff = abs(_azimuth_diff - 360.0)
+
+        # For azimuth-only rotators, we force elevation to 0, and ignore any incoming elevation data
+        # (which should be 0 anyway)
+        if self.azimuth_only:
+            _curr_el = 0.0
+            elevation = 0.0
+
+        if (_azimuth_diff > self.rotator_update_threshold) or (
             abs(elevation - _curr_el) > self.rotator_update_threshold
         ):
             # Move to the target position.
@@ -245,11 +267,13 @@ class Rotator(object):
 
     def home_rotator(self):
         """ Move the rotator to it's home position """
-        self.log_info("Moving rotator to home position.")
-        self.move_rotator(
-            azimuth=self.rotator_home_position[0],
-            elevation=self.rotator_home_position[1],
-        )
+        if not self.rotator_homed:
+            self.log_info("Moving rotator to home position.")
+            self.move_rotator(
+                azimuth=self.rotator_home_position[0],
+                elevation=self.rotator_home_position[1],
+            )
+            self.rotator_homed = True
 
     def rotator_update_thread(self):
         """ Rotator updater thread """
@@ -279,7 +303,7 @@ class Rotator(object):
                     _telem_age = time.time() - _telem_time
 
                     # If the telemetry is older than our homing delay, move to our home position.
-                    if _telem_age > self.rotator_homing_delay * 60.0:
+                    if _telem_age > self.rotator_homing_delay * 60.0 and not self.rotator_homed:
                         self.home_rotator()
 
                     else:
@@ -289,6 +313,11 @@ class Rotator(object):
                         ):
                             self.log_error(
                                 "Station position is 0,0 - not moving rotator."
+                            )
+                        # Check if this is a stale telemetry entry
+                        elif self.latest_telemetry_time == self.last_telemetry_time:
+                            self.log_debug(
+                                "Telemetry received is not new, not moving rotator."
                             )
                         else:
                             # Otherwise, calculate the new azimuth/elevation.
@@ -302,8 +331,13 @@ class Rotator(object):
                                 _position["bearing"], _position["elevation"]
                             )
 
+                            self.rotator_homed = False
+
                 except Exception as e:
                     self.log_error("Error handling new telemetry - %s" % str(e))
+
+            # Update last telemetry time
+            self.last_telemetry_time = self.latest_telemetry_time
 
             # Wait until the next update time.
             _i = 0
@@ -320,7 +354,9 @@ class Rotator(object):
         self.rotator_thread_running = False
 
         if self.rotator_thread is not None:
-            self.rotator_thread.join()
+            self.rotator_thread.join(60)
+            if self.rotator_thread.is_alive():
+                self.log_error("rotator control thread failed to join")
 
         self.log_debug("Stopped rotator control thread.")
 

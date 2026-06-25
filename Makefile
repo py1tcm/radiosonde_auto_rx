@@ -12,7 +12,9 @@ SUBDIRS := \
 	imet \
 	mk2a \
 	scan \
+	dropsonde \
 	utils \
+	weathex \
 
 all: $(SUBDIRS)
 

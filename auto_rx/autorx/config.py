@@ -27,11 +27,10 @@ global_config = {
 # Web interface credentials
 web_password = "none"
 
-# Fixed minimum update rates for APRS & Habitat
-# These are set to avoid congestion on the APRS-IS network, and on the Habitat server
-# Please respect other users of these networks and leave these settings as they are.
+# Fixed minimum update rate for APRS
+# This is set to avoid congestion on the APRS-IS network
+# Please respect other users of the network and leave this setting as it is.
 MINIMUM_APRS_UPDATE_RATE = 30
-MINIMUM_HABITAT_UPDATE_RATE = 30
 
 
 def read_auto_rx_config(filename, no_sdr_test=False):
@@ -108,13 +107,12 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         "min_radius_km": 0,
         "radius_temporary_block": False,
         # "sonde_time_threshold": 3, # Commented out to ensure warning message is shown.
+        "enable_realtime_filter": True,
+        "max_velocity": 300,
         # Habitat Settings
-        "habitat_enabled": False,
-        "habitat_upload_rate": 30,
         "habitat_uploader_callsign": "SONDE_AUTO_RX",
         "habitat_uploader_antenna": "1/4-wave",
         "habitat_upload_listener_position": False,
-        "habitat_payload_callsign": "<id>",
         # APRS Settings
         "aprs_enabled": False,
         "aprs_upload_rate": 30,
@@ -152,6 +150,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         "temporary_block_time": 60,
         "rs41_drift_tweak": False,
         "decoder_stats": False,
+        "max_async_scan_workers": 4,
         "ngp_tweak": False,
         # Rotator Settings
         "enable_rotator": False,
@@ -163,11 +162,14 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         "rotator_homing_delay": 10,
         "rotator_home_azimuth": 0,
         "rotator_home_elevation": 0,
+        "rotator_azimuth_only": False,
         # OziExplorer Settings
         "ozi_enabled": False,
         "ozi_update_rate": 5,
+        "ozi_host": "<broadcast>",
         "ozi_port": 55681,
         "payload_summary_enabled": False,
+        "payload_summary_host": "<broadcast>",
         "payload_summary_port": 55672,
         # Debugging settings
         "save_detection_audio": False,
@@ -176,16 +178,13 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         "save_raw_hex": False,
         "save_system_log": False,
         "enable_debug_logging": False,
-        # URL for the Habitat DB Server.
-        # As of July 2018 we send via sondehub.org, which will allow us to eventually transition away
-        # from using the habhub.org tracker, and leave it for use by High-Altitude Balloon Hobbyists.
-        # For now, sondehub.org just acts as a proxy to habhub.org.
-        # This setting is not exposed to users as it's only used for unit/int testing
-        "habitat_url": "https://habitat.sondehub.org/",
+        "save_cal_data": False,
         # New Sondehub DB Settings
         "sondehub_enabled": True,
         "sondehub_upload_rate": 30,
         # "sondehub_contact_email": "none@none.com" # Commented out to ensure a warning message is shown on startup
+        "wideband_sondes": False, # Wideband sonde detection / decoding
+        "close_on_encrypted": True,
     }
 
     try:
@@ -329,12 +328,6 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         auto_rx_config["max_altitude"] = config.getint("filtering", "max_altitude")
         auto_rx_config["max_radius_km"] = config.getint("filtering", "max_radius_km")
 
-        # Habitat Settings
-        # Deprecated from v1.5.0
-        # auto_rx_config["habitat_enabled"] = config.getboolean(
-        #     "habitat", "habitat_enabled"
-        # )
-        # auto_rx_config["habitat_upload_rate"] = config.getint("habitat", "upload_rate")
         auto_rx_config["habitat_uploader_callsign"] = config.get(
             "habitat", "uploader_callsign"
         )
@@ -344,19 +337,6 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         auto_rx_config["habitat_uploader_antenna"] = config.get(
             "habitat", "uploader_antenna"
         ).strip()
-
-        # try:  # Use the default configuration if not found
-        #     auto_rx_config["habitat_url"] = config.get("habitat", "url")
-        # except:
-        #     pass
-
-        # Deprecated from v1.5.0
-        # if auto_rx_config["habitat_upload_rate"] < MINIMUM_HABITAT_UPDATE_RATE:
-        #     logging.warning(
-        #         "Config - Habitat Update Rate clipped to minimum of %d seconds. Please be respectful of other users of Habitat."
-        #         % MINIMUM_HABITAT_UPDATE_RATE
-        #     )
-        #     auto_rx_config["habitat_upload_rate"] = MINIMUM_HABITAT_UPDATE_RATE
 
         # APRS Settings
         auto_rx_config["aprs_enabled"] = config.getboolean("aprs", "aprs_enabled")
@@ -425,6 +405,16 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             "advanced", "synchronous_upload"
         )
 
+        # Max async scan workers - validate and cap to reasonable limits
+        _max_workers = config.getint("advanced", "max_async_scan_workers")
+        if _max_workers < 1:
+            logging.warning(f"Config - max_async_scan_workers must be at least 1, setting to 1")
+            _max_workers = 1
+        elif _max_workers > 32:
+            logging.warning(f"Config - max_async_scan_workers capped at 32 (was {_max_workers})")
+            _max_workers = 32
+        auto_rx_config["max_async_scan_workers"] = _max_workers
+
         # Rotator Settings
         auto_rx_config["rotator_enabled"] = config.getboolean(
             "rotator", "rotator_enabled"
@@ -488,27 +478,33 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             "MEISEI": True,
             "MTS01": False, # Until we test it
             "MRZ": False,  # .... except for the MRZ, until we know it works.
+            "WXR301": True,
+            "WXRPN9": True,
+            "IMETWIDE": False,
+            "RD94RD41": True,
             "UDP": False,
         }
 
         auto_rx_config["decoder_spacing_limit"] = config.getint(
             "advanced", "decoder_spacing_limit"
         )
-        auto_rx_config["experimental_decoders"]["RS41"] = config.getboolean(
-            "advanced", "rs41_experimental"
-        )
-        auto_rx_config["experimental_decoders"]["RS92"] = config.getboolean(
-            "advanced", "rs92_experimental"
-        )
-        auto_rx_config["experimental_decoders"]["M10"] = config.getboolean(
-            "advanced", "m10_experimental"
-        )
-        auto_rx_config["experimental_decoders"]["DFM"] = config.getboolean(
-            "advanced", "dfm_experimental"
-        )
-        auto_rx_config["experimental_decoders"]["LMS6"] = config.getboolean(
-            "advanced", "lms6-400_experimental"
-        )
+        # Use 'experimental' (not really, anymore!) decoders for RS41, RS92, M10, DFM and LMS6-400.
+        # Don't allow overriding to the FM based decoders.
+        # auto_rx_config["experimental_decoders"]["RS41"] = config.getboolean(
+        #     "advanced", "rs41_experimental"
+        # )
+        # auto_rx_config["experimental_decoders"]["RS92"] = config.getboolean(
+        #     "advanced", "rs92_experimental"
+        # )
+        # auto_rx_config["experimental_decoders"]["M10"] = config.getboolean(
+        #     "advanced", "m10_experimental"
+        # )
+        # auto_rx_config["experimental_decoders"]["DFM"] = config.getboolean(
+        #     "advanced", "dfm_experimental"
+        # )
+        # auto_rx_config["experimental_decoders"]["LMS6"] = config.getboolean(
+        #     "advanced", "lms6-400_experimental"
+        # )
 
         try:
             auto_rx_config["web_control"] = config.getboolean("web", "web_control")
@@ -592,7 +588,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             logging.warning(
                 "Config - Did not find kml_refresh_rate setting, using default (10 seconds)."
             )
-            auto_rx_config["kml_refresh_rate"] = 11
+            auto_rx_config["kml_refresh_rate"] = 10
 
         # New Sondehub db Settings
         try:
@@ -782,6 +778,81 @@ def read_auto_rx_config(filename, no_sdr_test=False):
                 "Config - Did not find system / debug logging options, using defaults (disabled, unless set as a command-line option.)"
             )
 
+        # 1.6.2 - Encrypted Sonde Email Notifications
+        try:
+            auto_rx_config["email_encrypted_sonde_notifications"] = config.getboolean(
+                "email", "encrypted_sonde_notifications"
+            )
+        except:
+            logging.warning(
+                "Config - Did not find encrypted_sonde_notifications setting (new in v1.6.2), using default (True)"
+            )
+            auto_rx_config["email_encrypted_sonde_notifications"] = True
+
+
+        # 1.6.3 - Weathex WXR301d support
+        try:
+            auto_rx_config["wideband_sondes"] = config.getboolean(
+                "advanced", "wideband_sondes"
+            )
+        except:
+            logging.warning(
+                "Config - Missing wideband_sondes option (new in v1.6.3), using default (False)"
+            )
+            auto_rx_config["wideband_sondes"] = False
+
+        # 1.7.1 - Save RS41 Calibration Data
+        try:
+            auto_rx_config["save_cal_data"] = config.getboolean(
+                "logging", "save_cal_data"
+            )
+        except:
+            logging.warning(
+                "Config - Missing save_cal_data option (new in v1.7.1), using default (False)"
+            )
+            auto_rx_config["save_cal_data"] = False
+
+        # 1.7.5 - Azimuth-Only Rotator configuration
+        try:
+            auto_rx_config['rotator_azimuth_only'] = config.getboolean(
+                "rotator", "azimuth_only"
+            )
+        except:
+            logging.debug("Config - Missing rotator azimuth_only option (new in v1.7.5), using default (False)")
+            auto_rx_config['rotator_azimuth_only'] = False
+
+        # 1.7.5 - Targeted summary output
+        try:
+            auto_rx_config["ozi_host"] = config.get("oziplotter", "ozi_host")
+            auto_rx_config["payload_summary_host"] = config.get("oziplotter", "payload_summary_host")
+        except:
+            logging.warning(
+                "Config - Missing ozi_host or payload_summary_host option (new in v1.7.5), using default (<broadcast>)"
+            )
+            auto_rx_config["ozi_host"] = "<broadcast>"
+            auto_rx_config["payload_summary_host"] = "<broadcast>"
+
+        # 1.8.2 - Real time filtering
+        try:
+            auto_rx_config["enable_realtime_filter"] = config.getboolean("filtering", "enable_realtime_filter")
+            auto_rx_config["max_velocity"] = config.getint("filtering", "max_velocity")
+        except:
+            logging.warning(
+                "Config - Missing enable_realtime_filter or max_velocity option, using default (enabled, 300m/s)"
+            )
+            auto_rx_config["enable_realtime_filter"] = True
+            auto_rx_config["max_velocity"] = 300
+            
+        # 1.8.2 - Alternate behaviour for encrypted RS41-SGM sondes
+        try:
+            auto_rx_config["close_on_encrypted"] = config.getboolean(
+                "advanced", "close_on_encrypted"
+            )
+        except:
+            logging.warning(
+                "Config - Missing close_on_encrypted option (new in v1.8.2), using default (True)"
+            )
+            auto_rx_config["close_on_encrypted"] = True
 
         # If we are being called as part of a unit test, just return the config now.
         if no_sdr_test:
@@ -834,6 +905,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
                 ss_iq_path=auto_rx_config["ss_iq_path"],
                 ss_power_path=auto_rx_config["ss_power_path"],
                 check_freq=1e6*(auto_rx_config["max_freq"]+auto_rx_config["min_freq"])/2.0,
+                timeout=60
             )
 
             if not _sdr_ok:
@@ -855,7 +927,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             _sdr_ok = test_sdr(
                 sdr_type=auto_rx_config["sdr_type"],
                 sdr_hostname=auto_rx_config["sdr_hostname"],
-                sdr_port=auto_rx_config["sdr_port"]
+                sdr_port=auto_rx_config["sdr_port"],
+                timeout=60
             )
 
             if not _sdr_ok:
@@ -863,7 +936,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
                 return None
 
             for _n in range(1, auto_rx_config["sdr_quantity"] + 1):
-                _sdr_name = f"KA9Q{_n:02d}"
+                _sdr_name = f"KA9Q-{_n:02d}"
                 auto_rx_config["sdr_settings"][_sdr_name] = {
                     "ppm": 0,
                     "gain": 0,
@@ -872,8 +945,6 @@ def read_auto_rx_config(filename, no_sdr_test=False):
                     "task": None,
                 }
             
-            logging.critical("Config - KA9Q SDR Support not implemented yet - exiting.")
-            return None
         
         else:
             logging.critical(f"Config - Unknown SDR Type {auto_rx_config['sdr_type']} - exiting.")
@@ -906,7 +977,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         if len(auto_rx_config["sdr_settings"].keys()) == 0:
             # We have no SDRs to use!!
             logging.error("Config - No working SDRs! Cannot run...")
-            return None
+            raise SystemError("No working SDRs!")
         else:
             # Create a global copy of the configuration file at this point
             global_config = copy.deepcopy(auto_rx_config)
@@ -925,7 +996,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             web_password = auto_rx_config["web_password"]
 
             return auto_rx_config
-
+    except SystemError as e:
+        raise e
     except:
         traceback.print_exc()
         logging.error("Could not parse config file.")

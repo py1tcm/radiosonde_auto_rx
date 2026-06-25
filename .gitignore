@@ -41,8 +41,8 @@ auto_rx/dfm09mod
 auto_rx/dft_detect
 auto_rx/fsk_demod
 auto_rx/imet1rs_dft
+auto_rx/iq_dec
 auto_rx/lms6Xmod
-auto_rx/lms6mod
 auto_rx/m10mod
 auto_rx/m20mod
 auto_rx/mk2a1680mod
@@ -52,6 +52,7 @@ auto_rx/imet54mod
 auto_rx/mXXmod
 auto_rx/mp3h1mod
 auto_rx/mts01mod
+auto_rx/weathex301d
 
 m10
 meisei100mod
@@ -59,7 +60,6 @@ mk2a_lms1680
 demod/dfm09ecc
 demod/mod/dfm09mod
 demod/mod/lms6Xmod
-demod/mod/lms6mod
 demod/mod/meisei100mod
 demod/mod/rs41mod
 demod/mod/rs92mod
@@ -81,3 +81,4 @@ rs_module/rs41mod
 rs_module/rs92mod
 scan/reset_usb
 scan/rs_detect
+weathex/weathex301d

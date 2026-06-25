@@ -2,6 +2,8 @@
 #
 # Auto Sonde Decoder build script.
 
+set -e
+
 # Get the auto-rx version.
 AUTO_RX_VERSION="\"$(python3 -m autorx.version 2>/dev/null || python -m autorx.version)\""
 
@@ -38,5 +40,7 @@ mv ../demod/mod/imet54mod .
 mv ../demod/mod/mp3h1mod .
 mv ../demod/mod/mts01mod .
 mv ../demod/mod/iq_dec .
+mv ../weathex/weathex301d .
+mv ../dropsonde/rd94rd41drop .
 
 echo "Done!"

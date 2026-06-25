@@ -5,10 +5,13 @@
 #   Copyright (C) 2018  Mark Jessop <vk5qi@rfhead.net>
 #   Released under GNU GPL v3 or later
 #
+import autorx
 import datetime
 import logging
+import math
 import numpy as np
 import os
+import sys
 import platform
 import subprocess
 import time
@@ -18,12 +21,17 @@ from threading import Thread, Lock
 from types import FunctionType, MethodType
 from .utils import (
     detect_peaks,
-    rtlsdr_test,
-    reset_rtlsdr_by_serial,
-    reset_all_rtlsdrs,
-    peak_decimation,
+    timeout_cmd
 )
-from .sdr_wrappers import test_sdr, reset_sdr, get_sdr_name, get_sdr_iq_cmd, get_sdr_fm_cmd, get_power_spectrum
+from .sdr_wrappers import test_sdr, reset_sdr, get_sdr_name, get_sdr_iq_cmd, get_sdr_fm_cmd, get_power_spectrum, shutdown_sdr
+
+# Import async scanning for concurrent peak detection
+try:
+    from .scan_async import run_async_scan
+    ASYNC_SCAN_AVAILABLE = True
+except ImportError:
+    ASYNC_SCAN_AVAILABLE = False
+    logging.warning("Async scanning not available - falling back to sequential scanning")
 
 
 try:
@@ -91,18 +99,10 @@ def run_rtl_power(
     if os.path.exists(filename):
         os.remove(filename)
 
-    # Add -k 30 option, to SIGKILL rtl_power 30 seconds after the regular timeout expires.
-    # Note that this only works with the GNU Coreutils version of Timeout, not the IBM version,
-    # which is provided with OSX (Darwin).
-    if "Darwin" in platform.platform():
-        timeout_kill = ""
-    else:
-        timeout_kill = "-k 30 "
-
     rtl_power_cmd = (
-        "timeout %s%d %s %s-f %d:%d:%d -i %d -1 -c 25%% -p %d -d %s %s%s"
+        "%s %d %s %s-f %d:%d:%d -i %d -1 -c 25%% -p %d -d %s %s%s"
         % (
-            timeout_kill,
+            timeout_cmd(),
             dwell + 10,
             rtl_power_path,
             bias_option,
@@ -224,239 +224,22 @@ def read_rtl_power(filename):
     return (freq, power, freq_step)
 
 
-def detect_sonde(
-    frequency,
-    rs_path="./",
-    dwell_time=10,
-    sdr_type="RTLSDR",
-    sdr_hostname="localhost",
-    sdr_port=5555,
-    ss_iq_path = "./ss_iq",
-    rtl_fm_path="rtl_fm",
-    rtl_device_idx=0,
-    ppm=0,
-    gain=-1,
-    bias=False,
-    save_detection_audio=False,
-    ngp_tweak=False,
-):
-    """Receive some FM and attempt to detect the presence of a radiosonde.
+def parse_dft_detect_output(ret_output, sdr_name):
+    """
+    Parse dft_detect output and return detected sonde type and offset.
+
+    This function is shared between synchronous and async scanning to ensure
+    consistent detection logic.
 
     Args:
-        frequency (int): Frequency to perform the detection on, in Hz.
-        rs_path (str): Path to the RS binaries (i.e rs_detect). Defaults to ./
-        dwell_time (int): Timeout before giving up detection.
-        rtl_fm_path (str): Path to rtl_fm, or drop-in equivalent. Defaults to 'rtl_fm'
-        rtl_device_idx (int or str): Device index or serial number of the RTLSDR. Defaults to 0 (the first SDR found).
-        ppm (int): SDR Frequency accuracy correction, in ppm.
-        gain (int): SDR Gain setting, in dB. A gain setting of -1 enables the RTLSDR AGC.
-        bias (bool): If True, enable the bias tee on the SDR.
-        save_detection_audio (bool): Save the audio used in detection to a file.
-        ngp_tweak (bool): When scanning in the 1680 MHz sonde band, use a narrower FM filter for better RS92-NGP detection.
+        ret_output (str): Raw output from dft_detect
+        sdr_name (str): SDR name for logging
 
     Returns:
-        str/None: Returns None if no sonde found, otherwise returns a sonde type, from the following:
-            'RS41' - Vaisala RS41
-            'RS92' - Vaisala RS92
-            'DFM' - Graw DFM06 / DFM09 (similar telemetry formats)
-            'M10' - MeteoModem M10
-            'M20' - MeteoModem M20
-            'iMet' - interMet iMet
-            'MK2LMS' - LMS6, 1680 MHz variant (using MK2A 9600 baud telemetry)
-
+        tuple: (sonde_type, offset_est) or (None, 0.0) if no sonde detected
     """
-
-    # Notes:
-    # 400 MHz sondes: Use --bw 20  (20 kHz BW)
-    # 1680 MHz RS92 Setting: --bw 32
-    # 1680 MHz LMS6-1680: Use FM demod. as usual.
-
-    # Example command (for command-line testing):
-    # rtl_fm -T -p 0 -M fm -g 26.0 -s 15k -f 401500000 | sox -t raw -r 15k -e s -b 16 -c 1 - -r 48000 -t wav - highpass 20 | ./rs_detect -z -t 8
-
-    # Add a -T option if bias is enabled
-    bias_option = "-T " if bias else ""
-
-    # Add a gain parameter if we have been provided one.
-    if gain != -1:
-        gain_param = "-g %.1f " % gain
-    else:
-        gain_param = ""
-
-    # Adjust the detection bandwidth based on the band the scanning is occuring in.
-    if frequency < 1000e6:
-        # 400-406 MHz sondes - use a 20 kHz detection bandwidth.
-        _mode = "IQ"
-        _iq_bw = 48000
-        _if_bw = 20
-
-        # Try and avoid the RTLSDR 403.2 MHz spur.
-        # Note that this is only goign to work if we are detecting on 403.210 or 403.190 MHz.
-        if (abs(403200000 - frequency) < 20000) and (sdr_type == "RTLSDR"):
-            logging.debug("Scanner - Narrowing detection IF BW to avoid RTLSDR spur.")
-            _if_bw = 15
-        
-    else:
-        # 1680 MHz sondes
-        # Both the RS92-NGP and 1680 MHz LMS6 have a much wider bandwidth than their 400 MHz counterparts.
-        # The RS92-NGP is maybe 25 kHz wide, and the LMS6 is 175 kHz (!!) wide.
-        # Given the huge difference between these two, we default to using a very wide FM bandwidth, but allow the user
-        # to narrow this if only RS92-NGPs are expected.
-        if ngp_tweak:
-            # RS92-NGP detection
-            _mode = "IQ"
-            _iq_bw = 48000
-            _if_bw = 32
-        else:
-            # LMS6-1680 Detection
-            _mode = "FM"
-            _rx_bw = 250000 # Expanded to 250 kHz 2021-07-17. Results in better off-freq detection.
-
-    if _mode == "IQ":
-        # IQ decoding
-        rx_test_command = f"timeout {dwell_time * 2} "
-
-        rx_test_command += get_sdr_iq_cmd(
-            sdr_type=sdr_type,
-            frequency=frequency,
-            sample_rate=_iq_bw,
-            rtl_device_idx = rtl_device_idx,
-            rtl_fm_path = rtl_fm_path,
-            ppm = ppm,
-            gain = gain,
-            bias = bias,
-            sdr_hostname = sdr_hostname,
-            sdr_port = sdr_port,
-            ss_iq_path = ss_iq_path
-        )
-
-        # rx_test_command = (
-        #     "timeout %ds %s %s-p %d -d %s %s-M raw -F9 -s %d -f %d 2>/dev/null |"
-        #     % (
-        #         dwell_time * 2,
-        #         rtl_fm_path,
-        #         bias_option,
-        #         int(ppm),
-        #         str(device_idx),
-        #         gain_param,
-        #         _iq_bw,
-        #         frequency,
-        #     )
-        # )
-        # Saving of Debug audio, if enabled,
-        if save_detection_audio:
-            rx_test_command += "tee detect_%s.raw | " % str(rtl_device_idx)
-
-        rx_test_command += os.path.join(
-            rs_path, "dft_detect"
-        ) + " -t %d --iq --bw %d --dc - %d 16 2>/dev/null" % (
-            dwell_time,
-            _if_bw,
-            _iq_bw,
-        )
-
-    elif _mode == "FM":
-        # FM decoding
-
-        # Sample Source (rtl_fm)
-
-        rx_test_command = f"timeout {dwell_time * 2} "
-
-        rx_test_command += get_sdr_fm_cmd(
-            sdr_type=sdr_type,
-            frequency=frequency,
-            filter_bandwidth=_rx_bw,
-            sample_rate=48000,
-            highpass = 20,
-            lowpass = None,
-            rtl_device_idx = rtl_device_idx,
-            rtl_fm_path = rtl_fm_path,
-            ppm = ppm,
-            gain = gain,
-            bias = bias,
-            sdr_hostname = "",
-            sdr_port = 1234,
-        )
-
-        # rx_test_command = (
-        #     "timeout %ds %s %s-p %d -d %s %s-M fm -F9 -s %d -f %d 2>/dev/null |"
-        #     % (
-        #         dwell_time * 2,
-        #         rtl_fm_path,
-        #         bias_option,
-        #         int(ppm),
-        #         str(device_idx),
-        #         gain_param,
-        #         _rx_bw,
-        #         frequency,
-        #     )
-        # )
-        # # Sample filtering
-        # rx_test_command += (
-        #     "sox -t raw -r %d -e s -b 16 -c 1 - -r 48000 -t wav - highpass 20 2>/dev/null | "
-        #     % _rx_bw
-        # )
-
-        # Saving of Debug audio, if enabled,
-        if save_detection_audio:
-            rx_test_command += "tee detect_%s.wav | " % str(rtl_device_idx)
-
-        # Sample decoding / detection
-        # Note that we detect for dwell_time seconds, and timeout after dwell_time*2, to catch if no samples are being passed through.
-        rx_test_command += (
-            os.path.join(rs_path, "dft_detect") + " -t %d 2>/dev/null" % dwell_time
-        )
-
-    _sdr_name = get_sdr_name(
-        sdr_type, 
-        rtl_device_idx = rtl_device_idx, 
-        sdr_hostname = sdr_hostname, 
-        sdr_port = sdr_port
-    )
-
-    logging.debug(
-        f"Scanner ({_sdr_name}) - Using detection command: {rx_test_command}"
-    )
-    logging.debug(
-        f"Scanner ({_sdr_name})- Attempting sonde detection on {frequency/1e6 :.3f} MHz"
-    )
-
-    try:
-        FNULL = open(os.devnull, "w")
-        _start = time.time()
-        ret_output = subprocess.check_output(rx_test_command, shell=True, stderr=FNULL)
-        FNULL.close()
-        ret_output = ret_output.decode("utf8")
-    except subprocess.CalledProcessError as e:
-        # dft_detect returns a code of 1 if no sonde is detected.
-        # logging.debug("Scanner - dfm_detect return code: %s" % e.returncode)
-        if e.returncode == 124:
-            logging.error(f"Scanner ({_sdr_name}) - dft_detect timed out.")
-            raise IOError("Possible SDR lockup.")
-
-        elif e.returncode >= 2:
-            ret_output = e.output.decode("utf8")
-        else:
-            _runtime = time.time() - _start
-            logging.debug(
-                f"Scanner ({_sdr_name}) - dft_detect exited in {_runtime:.1f} seconds with return code {e.returncode}."
-            )
-            return (None, 0.0)
-    except Exception as e:
-        # Something broke when running the detection function.
-        logging.error(
-            f"Scanner ({_sdr_name}) - Error when running dft_detect - {sdr(e)}"
-        )
-        return (None, 0.0)
-
-    _runtime = time.time() - _start
-    logging.debug(
-        "Scanner - dft_detect exited in %.1f seconds with return code 1." % _runtime
-    )
-
     # Check for no output from dft_detect.
     if ret_output is None or ret_output == "":
-        # logging.error("Scanner - dft_detect returned no output?")
         return (None, 0.0)
 
     # Split the line into sonde type and correlation score.
@@ -490,73 +273,75 @@ def detect_sonde(
     if "RS41" in _type:
         logging.debug(
             "Scanner (%s) - Detected a RS41! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "RS41"
     elif "RS92" in _type:
         logging.debug(
             "Scanner (%s) - Detected a RS92! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "RS92"
     elif "DFM" in _type:
         logging.debug(
             "Scanner (%s) - Detected a DFM Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "DFM"
     elif "M10" in _type:
         logging.debug(
             "Scanner (%s) - Detected a M10 Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "M10"
     elif "M20" in _type:
         logging.debug(
             "Scanner (%s) - Detected a M20 Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "M20"
     elif "IMET4" in _type:
         logging.debug(
             "Scanner (%s) - Detected a iMet-4 Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "IMET"
     elif "IMET1" in _type:
+        # This could actually be a wideband iMet sonde. We treat this as a IMET4.
         logging.debug(
-            "Scanner (%s) - Detected a iMet Sonde! (Type %s - Unsupported) (Score: %.2f)"
-            % (_sdr_name, _type, _score)
+            "Scanner (%s) - Possible detection of a Wideband iMet Sonde! (Type %s) (Score: %.2f)"
+            % (sdr_name, _type, _score)
         )
-        _sonde_type = "IMET1"
+        # Override the type to IMET4.
+        _sonde_type = "IMET"
     elif "IMETafsk" in _type:
         logging.debug(
             "Scanner (%s) - Detected a iMet Sonde! (Type %s - Unsupported) (Score: %.2f)"
-            % (_sdr_name, _type, _score)
+            % (sdr_name, _type, _score)
         )
         _sonde_type = "IMET1"
     elif "IMET5" in _type:
         logging.debug(
             "Scanner (%s) - Detected a iMet-54 Sonde! (Score: %.2f)"
-            % (_sdr_name, _score)
+            % (sdr_name, _score)
         )
         _sonde_type = "IMET5"
     elif "LMS6" in _type:
         logging.debug(
             "Scanner (%s) - Detected a LMS6 Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         _sonde_type = "LMS6"
     elif "C34" in _type:
         logging.debug(
             "Scanner (%s) - Detected a Meteolabor C34/C50 Sonde! (Not yet supported...) (Score: %.2f)"
-            % (_sdr_name, _score)
+            % (sdr_name, _score)
         )
         _sonde_type = "C34C50"
     elif "MRZ" in _type:
         logging.debug(
             "Scanner (%s) - Detected a Meteo-Radiy MRZ Sonde! (Score: %.2f)"
-            % (_sdr_name, _score)
+            % (sdr_name, _score)
         )
         if _score < 0:
             _sonde_type = "-MRZ"
@@ -566,7 +351,7 @@ def detect_sonde(
     elif "MK2LMS" in _type:
         logging.debug(
             "Scanner (%s) - Detected a 1680 MHz LMS6 Sonde (MK2A Telemetry)! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         if _score < 0:
             _sonde_type = "-MK2LMS"
@@ -576,7 +361,7 @@ def detect_sonde(
     elif "MEISEI" in _type:
         logging.debug(
             "Scanner (%s) - Detected a Meisei Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         # Not currently sure if we expect to see inverted Meisei sondes.
         if _score < 0:
@@ -587,7 +372,7 @@ def detect_sonde(
     elif "MTS01" in _type:
         logging.debug(
             "Scanner (%s) - Detected a Meteosis MTS01 Sonde! (Score: %.2f, Offset: %.1f Hz)"
-            % (_sdr_name, _score, _offset_est)
+            % (sdr_name, _score, _offset_est)
         )
         # Not currently sure if we expect to see inverted Meteosis sondes.
         if _score < 0:
@@ -595,10 +380,280 @@ def detect_sonde(
         else:
             _sonde_type = "MTS01"
 
+    elif "WXR301" in _type:
+        logging.debug(
+            "Scanner (%s) - Detected a Weathex WxR-301D Sonde! (Score: %.2f, Offset: %.1f Hz)"
+            % (sdr_name, _score, _offset_est)
+        )
+        _sonde_type = "WXR301"
+        # Clear out the offset estimate for WxR-301's as it's not accurate
+        # to do no whitening on the signal.
+        _offset_est = 0.0
+
+    elif "WXRPN9" in _type:
+        logging.debug(
+            "Scanner (%s) - Detected a Weathex WxR-301D Sonde (PN9 Variant)! (Score: %.2f, Offset: %.1f Hz)"
+            % (sdr_name, _score, _offset_est)
+        )
+        _sonde_type = "WXRPN9"
+
+    elif "RD94RD41" in _type:
+        logging.debug(
+            "Scanner (%s) - Detected a RD94 or RD41 Dropsonde! (Score: %.2f, Offset: %.1f Hz)"
+            % (sdr_name, _score, _offset_est)
+        )
+        _sonde_type = "RD94RD41"
+
     else:
         _sonde_type = None
 
     return (_sonde_type, _offset_est)
+
+
+def detect_sonde(
+    frequency,
+    rs_path="./",
+    dwell_time=10,
+    sdr_type="RTLSDR",
+    sdr_hostname="localhost",
+    sdr_port=5555,
+    ss_iq_path = "./ss_iq",
+    rtl_fm_path="rtl_fm",
+    rtl_device_idx=0,
+    ppm=0,
+    gain=-1,
+    bias=False,
+    save_detection_audio=False,
+    ngp_tweak=False,
+    wideband_sondes=False
+):
+    """Receive some FM and attempt to detect the presence of a radiosonde.
+
+    Args:
+        frequency (int): Frequency to perform the detection on, in Hz.
+        rs_path (str): Path to the RS binaries (i.e rs_detect). Defaults to ./
+        dwell_time (int): Timeout before giving up detection.
+        rtl_fm_path (str): Path to rtl_fm, or drop-in equivalent. Defaults to 'rtl_fm'
+        rtl_device_idx (int or str): Device index or serial number of the RTLSDR. Defaults to 0 (the first SDR found).
+        ppm (int): SDR Frequency accuracy correction, in ppm.
+        gain (int): SDR Gain setting, in dB. A gain setting of -1 enables the RTLSDR AGC.
+        bias (bool): If True, enable the bias tee on the SDR.
+        save_detection_audio (bool): Save the audio used in detection to a file.
+        ngp_tweak (bool): When scanning in the 1680 MHz sonde band, use a narrower FM filter for better RS92-NGP detection.
+        wideband_sondes (bool): Use a wider detection filter to allow detection of Weathex and wideband iMet sondes.
+
+    Returns:
+        str/None: Returns None if no sonde found, otherwise returns a sonde type, from the following:
+            'RS41' - Vaisala RS41
+            'RS92' - Vaisala RS92
+            'DFM' - Graw DFM06 / DFM09 (similar telemetry formats)
+            'M10' - MeteoModem M10
+            'M20' - MeteoModem M20
+            'iMet' - interMet iMet
+            'MK2LMS' - LMS6, 1680 MHz variant (using MK2A 9600 baud telemetry)
+
+    """
+
+    # Notes:
+    # 400 MHz sondes
+    #  Normal mode: 48 kHz sample rate, 20 kHz IF BW
+    #  Wideband mode: 96 kHz sample rate, 64 kHz IF BW
+    # 1680 MHz RS92 Setting: --bw 32
+    # 1680 MHz LMS6-1680: Use FM demod. as usual.
+
+    # Example command (for command-line testing):
+    # rtl_fm -T -p 0 -M fm -g 26.0 -s 15k -f 401500000 | sox -t raw -r 15k -e s -b 16 -c 1 - -r 48000 -t wav - highpass 20 | ./rs_detect -z -t 8
+
+    # Add a -T option if bias is enabled
+    bias_option = "-T " if bias else ""
+
+    # Add a gain parameter if we have been provided one.
+    if gain != -1:
+        gain_param = "-g %.1f " % gain
+    else:
+        gain_param = ""
+
+    # Adjust the detection bandwidth based on the band the scanning is occuring in.
+    if frequency < 1000e6:
+        # 400-406 MHz sondes
+        _mode = "IQ"
+        if wideband_sondes:
+            _iq_bw = 96000
+            _if_bw = 64
+        else:
+            _iq_bw = 48000
+            _if_bw = 15
+        
+    else:
+        # 1680 MHz sondes
+        # Both the RS92-NGP and 1680 MHz LMS6 have a much wider bandwidth than their 400 MHz counterparts.
+        # The RS92-NGP is maybe 25 kHz wide, and the LMS6 is 175 kHz (!!) wide.
+        # Given the huge difference between these two, we default to using a very wide FM bandwidth, but allow the user
+        # to narrow this if only RS92-NGPs are expected.
+        if ngp_tweak:
+            # RS92-NGP detection
+            _mode = "IQ"
+            _iq_bw = 48000
+            _if_bw = 32
+        else:
+            # LMS6-1680 Detection
+            _mode = "FM"
+            _rx_bw = 250000 # Expanded to 250 kHz 2021-07-17. Results in better off-freq detection.
+
+    if _mode == "IQ":
+        # IQ decoding
+        rx_test_command = f"{timeout_cmd()} {dwell_time * 2} "
+
+        rx_test_command += get_sdr_iq_cmd(
+            sdr_type=sdr_type,
+            frequency=frequency,
+            sample_rate=_iq_bw,
+            rtl_device_idx = rtl_device_idx,
+            rtl_fm_path = rtl_fm_path,
+            ppm = ppm,
+            gain = gain,
+            bias = bias,
+            sdr_hostname = sdr_hostname,
+            sdr_port = sdr_port,
+            ss_iq_path = ss_iq_path,
+            scan = True
+        )
+
+        # rx_test_command = (
+        #     "%s %ds %s %s-p %d -d %s %s-M raw -F9 -s %d -f %d 2>/dev/null |"
+        #     % (
+        #         timeout_cmd(),
+        #         dwell_time * 2,
+        #         rtl_fm_path,
+        #         bias_option,
+        #         int(ppm),
+        #         str(device_idx),
+        #         gain_param,
+        #         _iq_bw,
+        #         frequency,
+        #     )
+        # )
+        # Saving of Debug audio, if enabled,
+        if save_detection_audio:
+            detect_iq_path = os.path.join(autorx.logging_path, f"detect_IQ_{frequency}_{_iq_bw}_{str(rtl_device_idx)}.raw")
+            rx_test_command += f" tee {detect_iq_path} |"
+
+        rx_test_command += os.path.join(
+            rs_path, "dft_detect"
+        ) + " -t %d --iq --bw %d --dc - %d 16 2>/dev/null" % (
+            dwell_time,
+            _if_bw,
+            _iq_bw,
+        )
+
+    elif _mode == "FM":
+        # FM decoding
+
+        # Sample Source (rtl_fm)
+
+        rx_test_command = f"{timeout_cmd()} {dwell_time * 2} "
+
+        rx_test_command += get_sdr_fm_cmd(
+            sdr_type=sdr_type,
+            frequency=frequency,
+            filter_bandwidth=_rx_bw,
+            sample_rate=48000,
+            highpass = 20,
+            lowpass = None,
+            rtl_device_idx = rtl_device_idx,
+            rtl_fm_path = rtl_fm_path,
+            ppm = ppm,
+            gain = gain,
+            bias = bias,
+            sdr_hostname = "",
+            sdr_port = 1234,
+        )
+
+        # rx_test_command = (
+        #     "%s %ds %s %s-p %d -d %s %s-M fm -F9 -s %d -f %d 2>/dev/null |"
+        #     % (
+        #         timeout_cmd(),
+        #         dwell_time * 2,
+        #         rtl_fm_path,
+        #         bias_option,
+        #         int(ppm),
+        #         str(device_idx),
+        #         gain_param,
+        #         _rx_bw,
+        #         frequency,
+        #     )
+        # )
+        # # Sample filtering
+        # rx_test_command += (
+        #     "sox -t raw -r %d -e s -b 16 -c 1 - -r 48000 -t wav - highpass 20 2>/dev/null | "
+        #     % _rx_bw
+        # )
+
+        # Saving of Debug audio, if enabled,
+        if save_detection_audio:
+            detect_audio_path = os.path.join(autorx.logging_path, f"detect_audio_{frequency}_{str(rtl_device_idx)}.wav")
+            rx_test_command += f" tee {detect_audio_path} |"
+
+        # Sample decoding / detection
+        # Note that we detect for dwell_time seconds, and timeout after dwell_time*2, to catch if no samples are being passed through.
+        rx_test_command += (
+            os.path.join(rs_path, "dft_detect") + " -t %d 2>/dev/null" % dwell_time
+        )
+
+    _sdr_name = get_sdr_name(
+        sdr_type, 
+        rtl_device_idx = rtl_device_idx, 
+        sdr_hostname = sdr_hostname, 
+        sdr_port = sdr_port
+    )
+
+    logging.debug(
+        f"Scanner ({_sdr_name}) - Using detection command: {rx_test_command}"
+    )
+    logging.debug(
+        f"Scanner ({_sdr_name})- Attempting sonde detection on {frequency/1e6 :.3f} MHz"
+    )
+
+    ret_output = ""
+    try:
+        FNULL = open(os.devnull, "w")
+        _start = time.time()
+        ret_output = subprocess.check_output(rx_test_command, shell=True, stderr=FNULL)
+        FNULL.close()
+        ret_output = ret_output.decode("utf8")
+
+    except subprocess.CalledProcessError as e:
+        # dft_detect returns a code of 1 if no sonde is detected.
+        # logging.debug("Scanner - dfm_detect return code: %s" % e.returncode)
+        if e.returncode == 124:
+            logging.error(f"Scanner ({_sdr_name}) - dft_detect timed out.")
+            raise IOError("Possible SDR lockup.")
+
+        elif e.returncode >= 2:
+            ret_output = e.output.decode("utf8")
+        else:
+            _runtime = time.time() - _start
+            logging.debug(
+                f"Scanner ({_sdr_name}) - dft_detect exited in {_runtime:.1f} seconds with return code {e.returncode}."
+            )
+            return (None, 0.0)
+    except Exception as e:
+        # Something broke when running the detection function.
+        logging.error(
+            f"Scanner ({_sdr_name}) - Error when running dft_detect - {str(e)}"
+        )
+        return (None, 0.0)
+    finally:
+        # Always release the SDR channel, even on failure
+        shutdown_sdr(sdr_type, rtl_device_idx, sdr_hostname, frequency, scan=True)
+
+    _runtime = time.time() - _start
+    logging.debug(
+        "Scanner - dft_detect exited in %.1f seconds with return code 1." % _runtime
+    )
+
+    # Use shared parsing function to ensure consistency with async scanning
+    return parse_dft_detect_output(ret_output, _sdr_name)
 
 
 #
@@ -649,6 +704,8 @@ class SondeScanner(object):
         temporary_block_list={},
         temporary_block_time=60,
         ngp_tweak=False,
+        wideband_sondes=False,
+        max_async_scan_workers=4
     ):
         """Initialise a Sonde Scanner Object.
 
@@ -698,6 +755,7 @@ class SondeScanner(object):
             temporary_block_list (dict): A dictionary where each attribute represents a frequency that should be blocked for a set time.
             temporary_block_time (int): How long (minutes) frequencies in the temporary block list should remain blocked for.
             ngp_tweak (bool): Narrow the detection filter when searching for 1680 MHz sondes, to enhance detection of RS92-NGPs.
+            wideband_sondes (bool): Use a wider detection filter to allow detection of Weathex and wideband iMet sondes.
         """
 
         # Thread flag. This is set to True when a scan is running.
@@ -736,6 +794,8 @@ class SondeScanner(object):
 
         self.callback = callback
         self.save_detection_audio = save_detection_audio
+        self.wideband_sondes = wideband_sondes
+        self.max_async_scan_workers = max_async_scan_workers
 
         # Temporary block list.
         self.temporary_block_list = temporary_block_list.copy()
@@ -783,9 +843,9 @@ class SondeScanner(object):
     def start(self):
         # Start the scan loop (if not already running)
         if self.sonde_scan_thread is None:
-            self.sonde_scanner_running = True
             self.sonde_scan_thread = Thread(target=self.scan_loop)
             self.sonde_scan_thread.start()
+            self.sonde_scanner_running = True
         else:
             self.log_warning("Sonde scan already running!")
 
@@ -813,7 +873,7 @@ class SondeScanner(object):
             # If we have hit the maximum number of permissable errors, quit.
             if self.error_retries > self.SONDE_SCANNER_MAX_ERRORS:
                 self.log_error(
-                    "Exceeded maximum number of consecutive RTLSDR errors. Closing scan thread."
+                    "Exceeded maximum number of consecutive SDR errors. Closing scan thread."
                 )
                 break
 
@@ -848,28 +908,42 @@ class SondeScanner(object):
                 self.log_warning("SDR produced no output... resetting and retrying.")
                 self.error_retries += 1
                 # Attempt to reset the SDR, if possible.
-                reset_sdr(
-                    self.sdr_type, 
-                    rtl_device_idx = self.rtl_device_idx, 
-                    sdr_hostname = self.sdr_hostname, 
-                    sdr_port = self.sdr_port
-                )
+                try:
+                    reset_sdr(
+                        self.sdr_type, 
+                        rtl_device_idx = self.rtl_device_idx, 
+                        sdr_hostname = self.sdr_hostname, 
+                        sdr_port = self.sdr_port
+                    )
+                except Exception as e:
+                    self.log_error(f"Caught error when trying to reset SDR - {str(e)}")
 
-                time.sleep(10)
+                for _ in range(10):
+                    if not self.sonde_scanner_running:
+                        break
+                    time.sleep(1)
                 continue
             except Exception as e:
                 traceback.print_exc()
                 self.log_error("Caught other error: %s" % str(e))
-                time.sleep(10)
+                for _ in range(10):
+                    if not self.sonde_scanner_running:
+                        break
+                    time.sleep(1)
             else:
                 # Scan completed successfuly! Reset the error counter.
                 self.error_retries = 0
 
             # Sleep before starting the next scan.
-            time.sleep(self.scan_delay)
+            for _ in range(self.scan_delay):
+                if not self.sonde_scanner_running:
+                    self.log_debug("Breaking out of scan loop.")
+                    break
+                time.sleep(1)
 
         self.log_info("Scanner Thread Closed.")
         self.sonde_scanner_running = False
+        self.sonde_scanner_thread = None
 
     def sonde_search(self, first_only=False):
         """Perform a frequency scan across a defined frequency range, and test each detected peak for the presence of a radiosonde.
@@ -924,10 +998,9 @@ class SondeScanner(object):
                 raise ValueError("Error getting PSD")
 
             # Update the global scan result
-            (_freq_decimate, _power_decimate) = peak_decimation(freq / 1e6, power, 10)
-            scan_result["freq"] = list(_freq_decimate)
-            scan_result["power"] = list(_power_decimate)
-            scan_result["timestamp"] = datetime.datetime.utcnow().isoformat()
+            scan_result["freq"] = [round(x,6) for x in list(freq/1e6)]
+            scan_result["power"] = [round(x,2) for x in list(power)]
+            scan_result["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             scan_result["peak_freq"] = []
             scan_result["peak_lvl"] = []
 
@@ -1027,6 +1100,7 @@ class SondeScanner(object):
             # This is actually a bit of a pain to do...
             _peak_freq = []
             _peak_lvl = []
+            _search_radius = math.ceil((self.quantization / 2) / self.search_step)
             for _peak in peak_frequencies:
                 try:
                     # Find the index of the peak within our decimated frequency array.
@@ -1036,13 +1110,13 @@ class SondeScanner(object):
                     # Because we've decimated the freq & power data, the peak location may
                     # not be exactly at this frequency, so we take the maximum of an area
                     # around this location.
-                    _peak_search_min = max(0, _peak_power_idx - 5)
+                    _peak_search_min = max(0, _peak_power_idx - _search_radius)
                     _peak_search_max = min(
-                        len(scan_result["freq"]) - 1, _peak_power_idx + 5
+                        len(scan_result["freq"]) - 1, _peak_power_idx + _search_radius
                     )
                     # Grab the maximum value, and append it and the frequency to the output arrays
                     _peak_lvl.append(
-                        max(scan_result["power"][_peak_search_min:_peak_search_max])
+                        max(scan_result["power"][_peak_search_min:_peak_search_max + 1])
                     )
                     _peak_freq.append(_peak / 1e6)
                 except:
@@ -1070,43 +1144,103 @@ class SondeScanner(object):
             )
 
         # Run rs_detect on each peak frequency, to determine if there is a sonde there.
-        for freq in peak_frequencies:
+        # OPTIMIZATION: Use concurrent async scanning ONLY with KA9Q-radio
+        # KA9Q provides virtual SDR channels that can actually scan concurrently
+        _use_async_scanning = False
+        if ASYNC_SCAN_AVAILABLE and self.sdr_type == "KA9Q" and len(peak_frequencies) > 1:
+            try:
+                import os
+                cpu_count = os.cpu_count() or 1
 
-            _freq = float(freq)
+                # With KA9Q, we can use multiple virtual channels concurrently
+                # The scanner creates temporary KA9Q channels that don't consume task slots
+                # Cap concurrency to min of: configured max, CPU cores, and number of peaks
+                max_concurrent = min(
+                    self.max_async_scan_workers,
+                    cpu_count,
+                    len(peak_frequencies)
+                )
 
-            # Exit opportunity.
-            if self.sonde_scanner_running == False:
-                return []
+                self.log_info(f"KA9Q: Using concurrent peak detection with {max_concurrent} workers")
 
-            (detected, offset_est) = detect_sonde(
-                _freq,
-                sdr_type=self.sdr_type,
-                sdr_hostname=self.sdr_hostname,
-                sdr_port=self.sdr_port,
-                ss_iq_path = self.ss_iq_path,
-                rtl_fm_path=self.rtl_fm_path,
-                rtl_device_idx=self.rtl_device_idx,
-                ppm=self.ppm,
-                gain=self.gain,
-                bias=self.bias,
-                dwell_time=self.detect_dwell_time,
-                save_detection_audio=self.save_detection_audio,
-            )
+                detections = run_async_scan(
+                    peak_frequencies=peak_frequencies,
+                    max_concurrent=max_concurrent,
+                    rs_path=self.rs_path,
+                    dwell_time=self.detect_dwell_time,
+                    sdr_type=self.sdr_type,
+                    sdr_hostname=self.sdr_hostname,
+                    sdr_port=self.sdr_port,
+                    ss_iq_path=self.ss_iq_path,
+                    rtl_fm_path=self.rtl_fm_path,
+                    rtl_device_idx=self.rtl_device_idx,
+                    ppm=self.ppm,
+                    gain=self.gain,
+                    bias=self.bias,
+                    save_detection_audio=self.save_detection_audio,
+                    wideband_sondes=self.wideband_sondes
+                )
 
-            if detected != None:
-                # Quantize the detected frequency (with offset) to 1 kHz
-                _freq = round((_freq + offset_est) / 1000.0) * 1000.0
+                # Process results
+                for _freq, detected in detections:
+                    if self.sonde_scanner_running == False:
+                        return []
 
-                # Add a detected sonde to the output array
-                _search_results.append([_freq, detected])
+                    _search_results.append([_freq, detected])
+                    self.send_to_callback([[_freq, detected]])
 
-                # Immediately send this result to the callback.
-                self.send_to_callback([[_freq, detected]])
-                # If we only want the first detected sonde, then return now.
-                if first_only:
-                    return _search_results
+                    if first_only:
+                        return _search_results
 
-                # Otherwise, we continue....
+                # Async scanning completed successfully
+                _use_async_scanning = True
+
+            except Exception as e:
+                import traceback
+                self.log_error(f"Async scanning failed: {e}, falling back to sequential")
+                self.log_debug(f"Async scan traceback: {traceback.format_exc()}")
+                # Fall through to sequential scanning below
+
+        # Standard sequential scanning (for RTLSDR, SpyServer, single peaks, or async fallback)
+        if not _use_async_scanning:
+            for freq in peak_frequencies:
+
+                _freq = float(freq)
+
+                # Exit opportunity.
+                if self.sonde_scanner_running == False:
+                    return []
+
+                (detected, offset_est) = detect_sonde(
+                    _freq,
+                    sdr_type=self.sdr_type,
+                    sdr_hostname=self.sdr_hostname,
+                    sdr_port=self.sdr_port,
+                    ss_iq_path = self.ss_iq_path,
+                    rtl_fm_path=self.rtl_fm_path,
+                    rtl_device_idx=self.rtl_device_idx,
+                    ppm=self.ppm,
+                    gain=self.gain,
+                    bias=self.bias,
+                    dwell_time=self.detect_dwell_time,
+                    save_detection_audio=self.save_detection_audio,
+                    wideband_sondes=self.wideband_sondes
+                )
+
+                if detected != None:
+                    # Quantize the detected frequency (with offset) to 1 kHz
+                    _freq = round((_freq + offset_est) / 1000.0) * 1000.0
+
+                    # Add a detected sonde to the output array
+                    _search_results.append([_freq, detected])
+
+                    # Immediately send this result to the callback.
+                    self.send_to_callback([[_freq, detected]])
+                    # If we only want the first detected sonde, then return now.
+                    if first_only:
+                        return _search_results
+
+                    # Otherwise, we continue....
 
         if len(_search_results) == 0:
             self.log_debug("No sondes detected.")
@@ -1139,12 +1273,16 @@ class SondeScanner(object):
 
     def stop(self, nowait=False):
         """Stop the Scan Loop"""
-        self.log_info("Waiting for current scan to finish...")
-        self.sonde_scanner_running = False
+        if self.sonde_scanner_running:
+            self.log_info("Waiting for current scan to finish...")
+            self.sonde_scanner_running = False
 
-        # Wait for the sonde scanner thread to close, if there is one.
-        if self.sonde_scan_thread != None and (not nowait):
-            self.sonde_scan_thread.join()
+            # Wait for the sonde scanner thread to close, if there is one.
+            if self.sonde_scan_thread != None and (not nowait):
+                self.sonde_scan_thread.join(60)
+                if self.sonde_scan_thread.is_alive():
+                    self.log_error("Scanning thread did not finish, terminating")
+                    sys.exit(4)
 
     def running(self):
         """Check if the scanner is running"""

@@ -214,7 +214,7 @@ def generate_station_object(
     _datum = "!w%s%s!" % (_lat_prec, _lon_prec)
 
     # Generate timestamp using current UTC time
-    _aprs_timestamp = datetime.datetime.utcnow().strftime("%H%M%S")
+    _aprs_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M%S")
 
     # Add version string to position comment, if requested.
     _aprs_comment = comment
@@ -760,13 +760,19 @@ class APRSUploader(object):
 
         # Wait for all threads to close.
         if self.upload_thread is not None:
-            self.upload_thread.join()
+            self.upload_thread.join(60)
+            if self.upload_thread.is_alive():
+                self.log_error("aprs upload thread failed to join")
 
         if self.timer_thread is not None:
-            self.timer_thread.join()
+            self.timer_thread.join(60)
+            if self.timer_thread.is_alive():
+                self.log_error("aprs timer thread failed to join")
 
         if self.input_thread is not None:
-            self.input_thread.join()
+            self.input_thread.join(60)
+            if self.input_thread.is_alive():
+                self.log_error("aprs input thread failed to join")
 
     def log_debug(self, line):
         """ Helper function to log a debug message with a descriptive heading. 
@@ -802,10 +808,10 @@ if __name__ == "__main__":
     # ['frame', 'id', 'datetime', 'lat', 'lon', 'alt', 'temp', 'type', 'freq', 'freq_float', 'datetime_dt']
     test_telem = [
         # These types of DFM serial IDs are deprecated
-        # {'id':'DFM06-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM09-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM15-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM17-12345678', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
+        # {'id':'DFM06-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM09-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM15-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM17-12345678', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
         {
             "id": "DFM-19123456",
             "frame": 10,
@@ -822,7 +828,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "DFM-123456",
@@ -840,7 +846,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "N1234567",
@@ -858,7 +864,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "M1234567",
@@ -876,7 +882,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
     ]
 

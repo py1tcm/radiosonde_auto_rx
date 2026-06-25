@@ -14,6 +14,7 @@ import logging
 import os.path
 import time
 import zipfile
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
@@ -21,14 +22,13 @@ from dateutil.parser import parse
 from autorx.utils import (
     short_type_lookup,
     short_short_type_lookup,
-    readable_timedelta,
     strip_sonde_serial,
     position_info,
 )
 from autorx.geometry import GenericTrack, getDensity
 
 
-def log_filename_to_stats(filename, quicklook=False):
+def log_filename_to_stats(filename, quicklook=False, stats_fields=False):
     """ Attempt to extract information about a log file from a supplied filename """
     # Example log file name: 20210430-235413_IMET-89F2720A_IMET_401999_sonde.log
     # ./log/20200320-063233_R2230624_RS41_402500_sonde.log
@@ -52,12 +52,16 @@ def log_filename_to_stats(filename, quicklook=False):
         _fields = _basename.split("_")
 
         # First field is the date/time the sonde was first received.
-        _date_str = _fields[0] + "Z"
-        _date_dt = parse(_date_str)
-
-        # Calculate age
-        _age_td = _now_dt - _date_dt
-        _time_delta = readable_timedelta(_age_td)
+        _date_str = _fields[0]
+        _date_dt = datetime.datetime(
+            int(_date_str[0:4]),
+            int(_date_str[4:6]),
+            int(_date_str[6:8]),
+            int(_date_str[9:11]),
+            int(_date_str[11:13]),
+            int(_date_str[13:15]),
+            tzinfo=datetime.timezone.utc
+        )
 
         # Re-format date
         _date_str2 = _date_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -75,7 +79,6 @@ def log_filename_to_stats(filename, quicklook=False):
 
         _output = {
             "datetime": _date_str2,
-            "age": _time_delta,
             "serial": _serial,
             "type": _type_str,
             "short_type": _short_type,
@@ -85,15 +88,19 @@ def log_filename_to_stats(filename, quicklook=False):
 
         if quicklook:
             try:
-                _quick = log_quick_look(filename)
+                _quick = log_quick_look(filename, stats_fields=stats_fields)
                 if _quick:
                     _output["first"] = _quick["first"]
                     _output["last"] = _quick["last"]
-                    _output["has_snr"] = _quick["has_snr"]
                     _output["max_range"] = int(max(_output["first"]["range_km"],_output["last"]["range_km"]))
                     _output["last_range"] = int(_output["last"]["range_km"])
                     _output["min_height"] = int(_output["last"]["alt"])
-                    _output["freq"] = _quick["first"]["freq"]
+                    if stats_fields:
+                        _output["has_snr"] = _quick["has_snr"]
+                else:
+                    logging.warning(f"No valid positional data when quicklooking {filename}.")
+                    return None
+
             except Exception as e:
                 logging.error(f"Could not quicklook file {filename}: {str(e)}")
 
@@ -104,7 +111,7 @@ def log_filename_to_stats(filename, quicklook=False):
         return None
 
 
-def log_quick_look(filename):
+def log_quick_look(filename, stats_fields=False):
     """ Attempt to read in the first and last line in a log file, and return the first/last position observed. """
 
     _filesize = os.path.getsize(filename)
@@ -133,7 +140,13 @@ def log_quick_look(filename):
         _first_lat = float(_fields[3])
         _first_lon = float(_fields[4])
         _first_alt = float(_fields[5])
-        _first_freq = float(_fields[13])
+
+        # Ignore log files where the first lat/lon are 0.0/0.0. 
+        # This *should* only be encrypted radiosondes. 
+        # Returning None here results in this file not showing up in the historical page log list.
+        if _first_lat == 0.0 and _first_lon == 0.0:
+            return None
+
         _pos_info = position_info(
             (
                 autorx.config.global_config["station_lat"],
@@ -147,11 +160,11 @@ def log_quick_look(filename):
             "lat": _first_lat,
             "lon": _first_lon,
             "alt": _first_alt,
-            "range_km": _pos_info["straight_distance"] / 1000.0,
-            "bearing": _pos_info["bearing"],
-            "elevation": _pos_info["elevation"],
-            "freq": _first_freq,
+            "range_km": round(_pos_info["straight_distance"] / 1000.0, 1),
+            "bearing": round(_pos_info["bearing"], 1),
         }
+        if stats_fields:
+            _output["first"]["elevation"] = _pos_info["elevation"]
     except Exception as e:
         # Couldn't read the first line, so likely no data.
         return None
@@ -187,10 +200,11 @@ def log_quick_look(filename):
             "lat": _last_lat,
             "lon": _last_lon,
             "alt": _last_alt,
-            "range_km": _pos_info["straight_distance"] / 1000.0,
-            "bearing": _pos_info["bearing"],
-            "elevation": _pos_info["elevation"],
+            "range_km": round(_pos_info["straight_distance"] / 1000.0, 1),
+            "bearing": round(_pos_info["bearing"], 1),
         }
+        if stats_fields:
+            _output["last"]["elevation"] = _pos_info["elevation"]
         return _output
     except Exception as e:
         # Couldn't read in the last line for some reason.
@@ -200,14 +214,17 @@ def log_quick_look(filename):
         return _output
 
 
-def list_log_files(quicklook=False):
+def list_log_files(quicklook=False, stats_fields=False, custom_log_dir=None):
     """ Look for all sonde log files within the logging directory """
 
     # Output list, which will contain one object per log file, ordered by time
     _output = []
 
     # Search for file matching the expected log file name
-    _log_mask = os.path.join(autorx.logging_path, "*_sonde.log")
+    if custom_log_dir:
+        _log_mask = os.path.join(custom_log_dir, "*_sonde.log")
+    else:
+        _log_mask = os.path.join(autorx.logging_path, "*_sonde.log")
     _log_files = glob.glob(_log_mask)
 
     # Sort alphanumerically, which will result in the entries being date ordered
@@ -216,7 +233,7 @@ def list_log_files(quicklook=False):
     _log_files.reverse()
 
     for _file in _log_files:
-        _entry = log_filename_to_stats(_file, quicklook=quicklook)
+        _entry = log_filename_to_stats(_file, quicklook=quicklook, stats_fields=stats_fields)
         if _entry:
             _output.append(_entry)
 
@@ -282,8 +299,26 @@ def read_log_file(filename, skewt_decimation=10):
         )
 
     else:
-        # Grab everything
-        _data = np.genfromtxt(_file, dtype=None, encoding="ascii", delimiter=",")
+        # Newer fields
+        # timestamp,serial,frame,lat,lon,alt,vel_v,vel_h,heading,temp,humidity,pressure,type,freq_mhz,snr,f_error_hz,sats,batt_v,burst_timer,aux_data
+
+        # There is a behaviour change between numpy <2.3 and >=2.3 (tested between 1.26.4 and 2.3.4)
+        # Numpy will no longer allow 'upgrading' a dtype from np.integer to a string type during type inference.
+        # This was deprecated in v2.3.0 - https://numpy.org/devdocs/release/2.3.0-notes.html#expired-deprecations
+        # "Converting np.complex, np.integer, np.signedinteger, np.unsignedinteger, np.generic to a dtype errors (deprecated since 1.19)"
+
+        # A common example of this is the burst-timer field, which is set to -1 if there is no burst timer data,
+        # but then gets set to a time (HH:MM:SS) when there is burst timer data.
+
+        # The workaround now is to ignore the burst_timer and aux_data fields, and look at a better way of representing missing data in log files in the future. 
+
+        _data = np.genfromtxt(
+            _file, 
+            dtype=None, 
+            encoding="ascii", 
+            delimiter=",", 
+            usecols=(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17))
+
 
     _file.close()
 
@@ -393,6 +428,11 @@ def calculate_skewt_data(
 
     while i < _burst_idx:
         i += decimation
+
+        # If we've hit the end of our data, break.
+        if i > (len(datetime) - 1):
+            break
+
         try:
             if temperature[i] < -260.0:
                 # If we don't have any valid temp data, just skip this point
@@ -455,9 +495,8 @@ def calculate_skewt_data(
                 break
 
         except Exception as e:
-            print(str(e))
-
-        # Continue through the data..
+            logging.exception(f"Exception {str(e)} in calculate_skewt_data")
+            raise
 
     return _skewt
 
@@ -512,6 +551,126 @@ def zip_log_files(serial_list=None):
 
     # Return the BytesIO object
     return data
+
+
+def coordinates_to_kml_placemark(lat, lon, alt,
+                                 name="Placemark Name",
+                                 description="Placemark Description",
+                                 absolute=False,
+                                 icon="https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png",
+                                 scale=1.0):
+    """ Generate a generic placemark object """
+
+    placemark = ET.Element("Placemark")
+
+    pm_name = ET.SubElement(placemark, "name")
+    pm_name.text = name
+    pm_desc = ET.SubElement(placemark, "description")
+    pm_desc.text = description
+
+    style = ET.SubElement(placemark, "Style")
+    icon_style = ET.SubElement(style, "IconStyle")
+    icon_scale = ET.SubElement(icon_style, "scale")
+    icon_scale.text = str(scale)
+    pm_icon = ET.SubElement(icon_style, "Icon")
+    href = ET.SubElement(pm_icon, "href")
+    href.text = icon
+
+    point = ET.SubElement(placemark, "Point")
+    if absolute:
+        altitude_mode = ET.SubElement(point, "altitudeMode")
+        altitude_mode.text = "absolute"
+    coordinates = ET.SubElement(point, "coordinates")
+    coordinates.text = f"{lon:.6f},{lat:.6f},{alt:.6f}"
+
+    return placemark
+
+
+def path_to_kml_placemark(flight_path,
+                          name="Flight Path Name",
+                          track_color="ff03bafc",
+                          poly_color="8003bafc",
+                          track_width=2.0,
+                          absolute=True,
+                          extrude=True):
+    ''' Produce a placemark object from a flight path array '''
+
+    placemark = ET.Element("Placemark")
+
+    pm_name = ET.SubElement(placemark, "name")
+    pm_name.text = name
+
+    style = ET.SubElement(placemark, "Style")
+    line_style = ET.SubElement(style, "LineStyle")
+    color = ET.SubElement(line_style, "color")
+    color.text = track_color
+    width = ET.SubElement(line_style, "width")
+    width.text = str(track_width)
+    if extrude:
+        poly_style = ET.SubElement(style, "PolyStyle")
+        color = ET.SubElement(poly_style, "color")
+        color.text = poly_color
+        fill = ET.SubElement(poly_style, "fill")
+        fill.text = "1"
+        outline = ET.SubElement(poly_style, "outline")
+        outline.text = "1"
+
+    line_string = ET.SubElement(placemark, "LineString")
+    if absolute:
+        if extrude:
+            ls_extrude = ET.SubElement(line_string, "extrude")
+            ls_extrude.text = "1"
+        altitude_mode = ET.SubElement(line_string, "altitudeMode")
+        altitude_mode.text = "absolute"
+    else:
+        ls_tessellate = ET.SubElement(line_string, "tessellate")
+        ls_tessellate.text = "1"
+    coordinates = ET.SubElement(line_string, "coordinates")
+    coordinates.text = " ".join(f"{lon:.6f},{lat:.6f},{alt:.6f}" for lat, lon, alt in flight_path)
+
+    return placemark
+
+
+def _log_file_to_kml_folder(filename, absolute=True, extrude=True, last_only=False):
+    ''' Convert a single sonde log file to a KML Folder object '''
+
+    # Read file.
+    _flight_data = read_log_file(filename)
+
+    _flight_serial = _flight_data["serial"]
+    _landing_time = _flight_data["last_time"]
+    _landing_pos = _flight_data["path"][-1]
+
+    _folder = ET.Element("Folder")
+    _name = ET.SubElement(_folder, "name")
+    _name.text = _flight_serial
+
+    # Generate the placemark & flight track.
+    _folder.append(coordinates_to_kml_placemark(_landing_pos[0], _landing_pos[1], _landing_pos[2],
+                                                name=_flight_serial, description=_landing_time, absolute=absolute))
+    if not last_only:
+        _folder.append(path_to_kml_placemark(_flight_data["path"], name="Track",
+                                             absolute=absolute, extrude=extrude))
+
+    return _folder
+
+
+def log_files_to_kml(file_list, kml_file, absolute=True, extrude=True, last_only=False):
+    """ Convert a collection of log files to a KML file """
+
+    kml_root = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
+    kml_doc = ET.SubElement(kml_root, "Document")
+
+    for file in file_list:
+        logging.debug(f"Converting {file} to KML")
+        try:
+            kml_doc.append(_log_file_to_kml_folder(file, absolute=absolute,
+                                                   extrude=extrude, last_only=last_only))
+        except Exception:
+            logging.exception(f"Failed to convert {file} to KML")
+
+    tree = ET.ElementTree(kml_root)
+    tree.write(kml_file, encoding="UTF-8", xml_declaration=True)
 
 
 if __name__ == "__main__":

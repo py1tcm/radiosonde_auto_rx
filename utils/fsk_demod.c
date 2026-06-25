@@ -54,6 +54,7 @@ int main(int argc,char *argv[]){
     struct FSK *fsk;
     struct MODEM_STATS stats;
     int Fs,Rs,M,P,stats_ctr,stats_loop;
+    long sample_count = 0;
     float loop_time;
     int enable_stats = 0;
     FILE *fin,*fout;
@@ -76,12 +77,14 @@ int main(int argc,char *argv[]){
     int nsym = FSK_DEFAULT_NSYM;
     int mask = 0;
     int tx_tone_separation = 100;
+    int softinv = 0;
 
     int o = 0;
     int opt_idx = 0;
     while( o != -1 ){
         static struct option long_opts[] = {
             {"help",      no_argument,        0, 'h'},
+            {"softinv",   no_argument,        0, 'i'},
             {"conv",      required_argument,  0, 'p'},
             {"cs16",      no_argument,        0, 'c'},
             {"cu8",       no_argument,        0, 'd'},
@@ -95,7 +98,7 @@ int main(int argc,char *argv[]){
             {0, 0, 0, 0}
         };
 
-        o = getopt_long(argc,argv,"fhlp:cdt::sb:u:m",long_opts,&opt_idx);
+        o = getopt_long(argc,argv,"fhilp:cdt::sb:u:m",long_opts,&opt_idx);
 
         switch(o){
         case 'c':
@@ -108,6 +111,9 @@ int main(int argc,char *argv[]){
             break;
         case 'f':
             testframe_mode = 1;
+            break;
+        case 'i':
+            softinv = 1;
             break;
         case 't':
             enable_stats = 1;
@@ -280,6 +286,7 @@ int main(int argc,char *argv[]){
             for(i=0;i<fsk_nin(fsk);i++){
                 modbuf[i].real = ((float)rawbuf[i])/FDMDV_SCALE;
                 modbuf[i].imag = 0.0;
+                sample_count++;
             }
         }
         else {
@@ -289,6 +296,7 @@ int main(int argc,char *argv[]){
                 for(i=0;i<fsk_nin(fsk);i++){
                     modbuf[i].real = ((float)rawbuf_u8[2*i]-127.0)/128.0;
                     modbuf[i].imag = ((float)rawbuf_u8[2*i+1]-127.0)/128.0;
+                    sample_count++;
                 }
             }
             else {
@@ -296,6 +304,7 @@ int main(int argc,char *argv[]){
                 for(i=0;i<fsk_nin(fsk);i++){
                     modbuf[i].real = ((float)rawbuf[2*i])/FDMDV_SCALE;
                     modbuf[i].imag = ((float)rawbuf[2*i+1]/FDMDV_SCALE);
+                    sample_count++;
                 }
             }
         }
@@ -354,9 +363,9 @@ int main(int argc,char *argv[]){
                 /* Print standard 2FSK stats */
 
                 fprintf(stderr,"{");
-                time_t seconds  = time(NULL);
 
-                fprintf(stderr,"\"secs\": %ld, \"EbNodB\": %5.1f, \"ppm\": %4d,",seconds, stats.snr_est, (int)fsk->ppm);
+                // Cast some values to avoid problems if time is long long
+                fprintf(stderr,"\"samples\": %ld, \"EbNodB\": %5.1f, \"ppm\": %4d,", sample_count, stats.snr_est, (int)fsk->ppm);                
                 float *f_est;
                 if (fsk->freq_est_type)
                     f_est = fsk->f2_est;
@@ -411,6 +420,13 @@ int main(int argc,char *argv[]){
         }
 
         if(soft_dec_mode){
+            // Invert soft decision polarity.
+            if(softinv){
+                for(j=0; j<fsk->Nbits; j++) {
+                    sdbuf[j] = sdbuf[j]*-1.0;
+                }
+            }
+
             fwrite(sdbuf,sizeof(float),fsk->Nbits,fout);
         }else{
             fwrite(bitbuf,sizeof(uint8_t),fsk->Nbits,fout);

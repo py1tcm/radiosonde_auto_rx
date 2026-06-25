@@ -17,11 +17,11 @@
 
     <!-- Import local libraries -->
     <script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/jquery-ui.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/leaflet.js') }}"></script>
     <script src="{{ url_for('static', filename='js/leaflet-providers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/Leaflet.fullscreen.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/leaflet.edgebuffer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/L.TileLayer.NoGap.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/scan_chart.js') }}"></script>
     <script src="{{ url_for('static', filename='js/c3.min.js') }}"></script>
@@ -51,6 +51,7 @@
                     $('#main span').css('color', 'black')
                 }
                 $('#main p').css('color', 'black')
+                $('#main details').css('color', 'black')
                 $('.modal-content p').css('color', 'black')
                 $('.modal-content h2').css('color', 'black')
                 $('.modal-content span').css('color', 'black')
@@ -77,6 +78,7 @@
                     $('#main span').css('color', 'white')
                 }
                 $('#main p').css('color', 'white')
+                $('#main details').css('color', 'white')
                 $('.modal-content p').css('color', 'white')
                 $('.modal-content h2').css('color', 'white')
                 $('.modal-content span').css('color', 'white')
@@ -99,13 +101,13 @@
 
         $( document ).ready(function() {
 
-            namespace = '/update_status';
-
-            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
-
+	    namespace = '/update_status';
+	    var socket_path = "{{ url_for("static", filename="") }}".replace('static/', 'socket.io')
+	    var socket = io.connect(location.origin+namespace, {'path': socket_path});
+ 
             $.ajax({
                   // Get station.cfg file.
-                  url: "/get_config",
+                  url: "get_config",
                   dataType: 'json',
                   async: false,
                   success: function(data) {
@@ -129,7 +131,7 @@
 
             $.ajax({
                   // Get local version number.
-                  url: "/get_version",
+                  url: "get_version",
                   dataType: 'json',
                   async: true,
                   success: function(data) {
@@ -196,7 +198,11 @@
             socket.on('scan_event', function(msg) {
                 // There is Scan data ready for us!
                 // Grab the latest set of data.
-                $.getJSON("/get_scan_data", function(data){
+                $.getJSON("get_scan_data", function(data){
+                    if (data.freq.length == 0) {
+                        return;
+                    }
+
                     // Load the data into our data stores.
                     scan_chart_spectra.columns[0] = ['x_spectra'].concat(data.freq);
                     scan_chart_spectra.columns[1] = ['Spectra'].concat(data.power);
@@ -207,7 +213,7 @@
                     scan_chart_latest_timestamp = data.timestamp;
 
                     // Do not update the scan plot if the tab is hidden, or we have the scan plot hidden.
-                    if( (document.visibilityState == "hidden") || (document.getElementById("showscanbutton").checked == false) ){
+                    if( (document.visibilityState == "hidden") || (document.getElementById("scanid").hasAttribute("open") == false) ){
                         return;
                     } else {
                         redraw_scan_chart(data);
@@ -218,7 +224,7 @@
             });
 
             document.addEventListener("visibilitychange", () => {
-                if (document.visibilityState === "visible" && document.getElementById("showscanbutton").checked) {
+                if (document.visibilityState === "visible" && document.getElementById("scanid").hasAttribute("open")) {
                     redraw_scan_chart();
                 }
             });
@@ -306,18 +312,17 @@
 
             // Check if user has preffered map visiblity.
             if (getCookie('map') == 'false') {
-                document.getElementById("showmapbutton").checked = false;
+                document.getElementById("mapid_details").removeAttribute("open") ;
                 document.getElementById("mapid").style.display = "none";
             } else {
-                document.getElementById("showmapbutton").checked = true;
+                document.getElementById("mapid_details").setAttribute("open", true) ;
             }
 
             // Check if user has preffered table visiblity.
             if (getCookie('table') == 'false') {
-                document.getElementById("showtablebutton").checked = false;
-                document.getElementById("tableid").style.display = "none";
+                document.getElementById("tableid").removeAttribute("open") ;
             } else {
-                document.getElementById("showtablebutton").checked = true;
+                document.getElementById("tableid").setAttribute("open", true) ;
             }
 
             // Check if user has preffered follow latest sonde selection.
@@ -354,11 +359,9 @@
 
             // Check if user has preffered scan chart visiblity.
             if (getCookie('scan') == 'true') {
-                document.getElementById("showscanbutton").checked = true;
-                document.getElementById("scanid").style.display = "block";
+                document.getElementById("scanid").setAttribute("open", true) ;
             } else {
-                document.getElementById("showscanbutton").checked = false;
-                document.getElementById("scanid").style.display = "none";
+                document.getElementById("scanid").removeAttribute("open") ;
             }
 
             // Check if user has dark mode set.
@@ -454,6 +457,53 @@
                 }
             }
 
+            $("#tasking").on("toggle", function() {
+                mymap.invalidateSize();
+            })
+
+            $("#tableid").on("toggle", function() {
+                mymap.invalidateSize();
+                setCookie("table", $("#tableid").prop("open"), 365);
+            })
+
+            $("#scanid").on("toggle", function() {
+                mymap.invalidateSize();
+                setCookie("scan", $("#scanid").prop("open"), 365);
+                if ($("#scanid").prop("open")) {
+                    redraw_scan_chart();
+                    scan_chart_obj.flush();
+                }
+            })
+
+            $("#mapid_details").on("toggle", function() {
+                mymap.invalidateSize();
+                setCookie("map", $("#mapid_details").prop("open"), 365);
+                if ($("#mapid_details").prop("open")) {
+                    document.getElementById("mapid").style.display = "block";
+                    mymap.invalidateSize();
+                } else {
+                    document.getElementById("mapid").style.display = "none";
+                }
+            })
+
+            $(document).on('keydown', function(event) {
+                if (event.key === 't' || event.keyCode === 84) { // Check for 't'
+                    $("#tableid").prop("open", function(index, value) {
+                        return !value;
+                    });
+                }
+                if (event.key === 's' || event.keyCode === 83) { // Check for 's'
+                    $("#scanid").prop("open", function(index, value) {
+                        return !value;
+                    });
+                }
+                if (event.key === 'm' || event.keyCode === 77) { // Check for 'm'
+                    $("#mapid_details").prop("open", function(index, value) {
+                        return !value;
+                    });
+                }
+            });
+
             // Create Tabulator table.
             table = new Tabulator("#telem_table", {
                 index:"realid",
@@ -462,7 +512,7 @@
                 pagination:"local",
                 paginationSize:pagination_size,
                 layout:"fitDataFill",
-                resizableColumns:"header",
+                columnDefaults:{resizable:"header"},
                 layoutColumnsOnNewData:true,
                 columns:[ //Define Table Columns
                     {title:"SDR", field:"sdr_device_idx", headerSort:true},
@@ -471,16 +521,16 @@
                     {title:'Freq (MHz)', field:"freq", headerSort:true},
                     {title:"ID", field:"id", width:125, headerSort:true, formatter:function(cell, formatterParams, onRendered){
                         _cell_data = cell.getData();
-                        _id = _cell_data.id.replace(/^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|IMS100|RS11G|MTS01)-/,"");
-                        _sondehub_id = _cell_data.id.replace(/^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|IMS100|RS11G|MTS01)-/,"");
+                        _id = _cell_data.id.replace(/^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|IMS100|RS11G|MTS01|WXR)-/,"");
+                        _sondehub_id = _cell_data.id.replace(/^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|IMS100|RS11G|MTS01|WXR)-/,"");
 
                         // Add Sondehub Link
-                        _id += "&nbsp;<a href='http://sondehub.org/" + _sondehub_id + "' title='View on Sondehub' target='_blank'>" + "<img src='{{ url_for('static', filename='img/sondehub.png')}}'/>" + "</a>";
+                        _id += "&nbsp;<a href='http://sondehub.org/" + _sondehub_id + "' title='View on Sondehub' target='_blank'>" + "<img src='{{ url_for('static', filename='img/sondehub.png')}}' width='14' height='16'/>" + "</a>";
 
                         // Add Radiosondy Link
                         if(_cell_data.aprsid != null){
                             _aprs_id = _cell_data.aprsid.trim();
-                            _id += "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + _aprs_id + "' title='View on Radiosondy.info' target='_blank'>" + "<img src='{{ url_for('static', filename='img/radiosondy.png')}}'/>" + "</a>";
+                            _id += "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + _aprs_id + "' title='View on Radiosondy.info' target='_blank'>" + "<img src='{{ url_for('static', filename='img/radiosondy.png')}}' width='17' height='16'/>" + "</a>";
 
                         } else {
                             _aprs_id = null;
@@ -582,50 +632,51 @@
                     {title:"Other", field:"other", width:140, headerSort:false},
                     {title:"Real ID", field:"realid", visible:false}
                 ],
-                rowContext:function(e, row){
-                    e.preventDefault();
-                    //Highlight Sonde on map when row selected
-                    for (var i = 0; i < Object.keys(sonde_positions).length; i++) {
-                        console.log(Object.keys(sonde_positions)[i]);
-                        if (Object.keys(sonde_positions)[i] != row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")) {
-                            sonde_positions[Object.keys(sonde_positions)[i]]['path'].setStyle({
-                              color: sonde_positions[Object.keys(sonde_positions)[i]]['colour']
-                            });
-                            if (sonde_positions[Object.keys(sonde_positions)[i]]['latest_data']['vel_v'] < 0){
-                                sonde_positions[Object.keys(sonde_positions)[i]].marker.setIcon(sondeDescentIcons[sonde_positions[Object.keys(sonde_positions)[i]]['colour']]);
-                            }else{
-                                sonde_positions[Object.keys(sonde_positions)[i]].marker.setIcon(sondeAscentIcons[sonde_positions[Object.keys(sonde_positions)[i]]['colour']]);
-                            }
+            });
+
+            table.on("rowContext", function(e, row){
+                e.preventDefault();
+                //Highlight Sonde on map when row selected
+                for (var i = 0; i < Object.keys(sonde_positions).length; i++) {
+                    console.log(Object.keys(sonde_positions)[i]);
+                    if (Object.keys(sonde_positions)[i] != row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")) {
+                        sonde_positions[Object.keys(sonde_positions)[i]]['path'].setStyle({
+                            color: sonde_positions[Object.keys(sonde_positions)[i]]['colour']
+                        });
+                        if (sonde_positions[Object.keys(sonde_positions)[i]]['latest_data']['vel_v'] < 0){
+                            sonde_positions[Object.keys(sonde_positions)[i]].marker.setIcon(sondeDescentIcons[sonde_positions[Object.keys(sonde_positions)[i]]['colour']]);
+                        }else{
+                            sonde_positions[Object.keys(sonde_positions)[i]].marker.setIcon(sondeAscentIcons[sonde_positions[Object.keys(sonde_positions)[i]]['colour']]);
                         }
                     }
-
-                    if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path']['options']['color'] != 'white') {
-                        selected_sonde = row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "");
-                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path'].setStyle({
-                          color: 'white'
-                        });
-                        /*
-                        if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['latest_data']['vel_v'] < 0){
-                            sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeDescentIcons['white']);
-                        }else{
-                            sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeAscentIcons['white']);
-                        }
-                        */
-                    } else {
-                        selected_sonde = "";
-                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path'].setStyle({
-                          color: sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']
-                        });
-                        /*
-                        if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['latest_data']['vel_v'] < 0){
-                            sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeDescentIcons[sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']]);
-                        }else{
-                            sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeAscentIcons[sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']]);
-                        }
-                        */
-                    }
-
                 }
+
+                if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path']['options']['color'] != 'white') {
+                    selected_sonde = row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "");
+                    sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path'].setStyle({
+                        color: 'white'
+                    });
+                    /*
+                    if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['latest_data']['vel_v'] < 0){
+                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeDescentIcons['white']);
+                    }else{
+                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeAscentIcons['white']);
+                    }
+                    */
+                } else {
+                    selected_sonde = "";
+                    sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['path'].setStyle({
+                        color: sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']
+                    });
+                    /*
+                    if (sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['latest_data']['vel_v'] < 0){
+                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeDescentIcons[sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']]);
+                    }else{
+                        sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")].marker.setIcon(sondeAscentIcons[sonde_positions[row['_row']['data']['id'].replace(/(<([^>]+)>)/gi, "")]['colour']]);
+                    }
+                    */
+                }
+
             });
 
             // Update Tabulator table.
@@ -689,17 +740,6 @@
                         sonde_id_data.vel_h = (sonde_id_data.vel_h*3.6).toFixed(1);
 
 
-                        // Add a link to HabHub if we have habitat enabled.
-                        // if (autorx_config.sondehub_enabled == true) {
-                        //     sonde_id_data.id = "<a href='http://sondehub.org/" + sonde_id.replace(/^(DFM|M10|M20|IMET|IMET54|MRZ)-/,"") + "' target='_blank'>" + sonde_id  + "</a>";
-                        // // These links are only going to work for Vaisala radiosondes since the APRS callsign is never passed through to the web interface,
-                        // // and the APRS callsigns for everything other than RS41s and RS92s is different to the 'full' serials
-                        // } else if (autorx_config.aprs_enabled == true && autorx_config.aprs_server == "radiosondy.info") {
-                        //     sonde_id_data.id = "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + sonde_id + "' target='_blank'>" + sonde_id + "</a>";
-                        // } else if (autorx_config.aprs_enabled == true) {
-                        //     sonde_id_data.id = "<a href='https://aprs.fi/#!call=" + sonde_id + "&timerange=3600&tail=3600' target='_blank'>" + sonde_id + "</a>";
-                        // }
-
                         sonde_id_data.realid = sonde_id;
 
                         // Add SNR data, if it exists.
@@ -709,6 +749,14 @@
 
                         // Add data into the 'other' field.
                         sonde_id_data.other = "";
+
+                        if(sonde_id_data.hasOwnProperty('rs41_mainboard')){
+                            // Only print mainboard type if it's not the 'original' mainboard.
+                            if(sonde_id_data.rs41_mainboard !== 'RSM412'){
+                                sonde_id_data.other += sonde_id_data.rs41_mainboard + " ";
+                            }
+                        }
+
                         // Burst timer for RS41s
                         if (sonde_id_data.hasOwnProperty('bt')){
                             if ((sonde_id_data.bt >= 0) && (sonde_id_data.bt < 65535)) {
@@ -719,24 +767,43 @@
                             sonde_id_data.other += sonde_id_data.batt.toFixed(1) + " V";
                         }
 
+                        if (sonde_id_data.hasOwnProperty('encrypted')){
+                            if(sonde_id_data.encrypted === true){
+                                sonde_id_data.other += " Encrypted";
+                            }
+                        }
+
+                        if (sonde_id_data.hasOwnProperty('aux')){
+                            sonde_id_data.type += "-XDATA";
+                        }
+
+
                         telem_data.push(sonde_id_data);
                     });
                 }
-                table.updateOrAddData(telem_data);
+                if (telem_data.length > 0) {
+                    table.updateOrAddData(telem_data);
+                }
                 // Hide table page navigation if only one page.
                 if(table.getPageMax() == 1){
                     $(".tabulator-footer").hide();
                 }else{
                     $(".tabulator-footer").show();
                 }
+                mymap.invalidateSize();
             }
+
+            table.on("pageLoaded", function(pageno) {
+                mymap.invalidateSize();
+            });
+
             // Invalidate map size to fix problems with elements resizing.
             mymap.invalidateSize();
 
             var initial_load_complete = false;
             selected_sonde = "";
             $.ajax({ // Get archived data.
-                  url: "/get_telemetry_archive",
+                  url: "get_telemetry_archive",
                   dataType: 'json',
                   async: true,
                   success: function(data) {
@@ -847,6 +914,7 @@
 
                     colour_idx = (colour_idx+1)%colour_values.length;
                     // If this is our first sonde since the browser has been opened, follow it.
+                    // QI - Unsure this actually does anything anymore
                     if (Object.keys(sonde_positions).length == 1){
                         sonde_positions[msg.id].following = true;
                     }
@@ -901,8 +969,10 @@
 
                 // Are we currently following any other sondes?
                 if (sonde_currently_following == "none"){
-                    // If not, follow this one!
-                    sonde_currently_following = msg.id;
+                    // If not, follow this one... unless it's encrypted
+                    if (!msg.hasOwnProperty('encrypted') || msg.encrypted === false){
+                        sonde_currently_following = msg.id;
+                    }
                 }
 
                 // Is sonde following enabled?
@@ -1081,147 +1151,149 @@
               }
             });
 
-            // Runs once at page load to set which Tabulator columns to show/hide per set cookies
-            for (i = 0; i < 19; i++) {
-                var show = getCookie("col"+i);
-                if (show == 'false') {
-                    document.getElementById("checkbox" + i).checked = false;
-                    switch(i) {
-                        case 0:
-                            table.hideColumn("sdr_device_idx");
-                            break;
-                        case 1:
-                            table.hideColumn("age");
-                            break;
-                        case 2:
-                            table.hideColumn("type");
-                            break;
-                        case 3:
-                            table.hideColumn("freq");
-                            break;
-                        case 4:
-                            table.hideColumn("id");
-                            break;
-                        case 5:
-                            table.hideColumn("datetime");
-                            break;
-                        case 6:
-                            table.hideColumn("frame");
-                            break;
-                        case 7:
-                            table.hideColumn("lat");
-                            break;
-                        case 8:
-                            table.hideColumn("lon");
-                            break;
-                        case 9:
-                            table.hideColumn("alt");
-                            break;
-                        case 10:
-                            table.hideColumn("vel_h");
-                            break;
-                        case 11:
-                            table.hideColumn("vel_v");
-                            break;
-                        case 12:
-                            table.hideColumn("temp");
-                            break;
-                        case 13:
-                            table.hideColumn("humidity");
-                            break;
-                        case 14:
-                            table.hideColumn("azimuth");
-                            break;
-                        case 15:
-                            table.hideColumn("elevation");
-                            break;
-                        case 16:
-                            table.hideColumn("range");
-                            break;
-                        case 17:
-                            table.hideColumn("snr");
-                            break;
-                        case 18:
-                            table.hideColumn("other");
-                            break;
-                    }
-                } else if (show == 'true') {
-                    document.getElementById("checkbox" + i).checked = true;
-                } else {
-                    if ($( window ).width() > 1200) {
-                        document.getElementById("checkbox" + i).checked = true;
-                    } else { // If no cookies are set on mobile device show limited number for better experience.
-                        if ([1,4,9,16].includes(i)) {
-                            setCookie("col" + i, 'true', 365);
-                            document.getElementById("checkbox" + i).checked = true;
+            table.on("tableBuilt", function() {
+                // Runs once at page load to set which Tabulator columns to show/hide per set cookies
+                for (i = 0; i < 19; i++) {
+                    var show = getCookie("col"+i);
+                    if (show == 'false') {
+                        document.getElementById("checkbox" + i).checked = false;
+                        switch(i) {
+                            case 0:
+                                table.hideColumn("sdr_device_idx");
+                                break;
+                            case 1:
+                                table.hideColumn("age");
+                                break;
+                            case 2:
+                                table.hideColumn("type");
+                                break;
+                            case 3:
+                                table.hideColumn("freq");
+                                break;
+                            case 4:
+                                table.hideColumn("id");
+                                break;
+                            case 5:
+                                table.hideColumn("datetime");
+                                break;
+                            case 6:
+                                table.hideColumn("frame");
+                                break;
+                            case 7:
+                                table.hideColumn("lat");
+                                break;
+                            case 8:
+                                table.hideColumn("lon");
+                                break;
+                            case 9:
+                                table.hideColumn("alt");
+                                break;
+                            case 10:
+                                table.hideColumn("vel_h");
+                                break;
+                            case 11:
+                                table.hideColumn("vel_v");
+                                break;
+                            case 12:
+                                table.hideColumn("temp");
+                                break;
+                            case 13:
+                                table.hideColumn("humidity");
+                                break;
+                            case 14:
+                                table.hideColumn("azimuth");
+                                break;
+                            case 15:
+                                table.hideColumn("elevation");
+                                break;
+                            case 16:
+                                table.hideColumn("range");
+                                break;
+                            case 17:
+                                table.hideColumn("snr");
+                                break;
+                            case 18:
+                                table.hideColumn("other");
+                                break;
                         }
-                        if ([0,2,3,5,6,7,8,10,11,12,13,14,15,17,18].includes(i)) {
-                            setCookie("col" + i, 'false', 365);
-                            document.getElementById("checkbox" + i).checked = false;
-                            switch(i) {
-                                case 0:
-                                    table.hideColumn("sdr_device_idx");
-                                    break;
-                                case 1:
-                                    table.hideColumn("age");
-                                    break;
-                                case 2:
-                                    table.hideColumn("type");
-                                    break;
-                                case 3:
-                                    table.hideColumn("freq");
-                                    break;
-                                case 4:
-                                    table.hideColumn("id");
-                                    break;
-                                case 5:
-                                    table.hideColumn("datetime");
-                                    break;
-                                case 6:
-                                    table.hideColumn("frame");
-                                    break;
-                                case 7:
-                                    table.hideColumn("lat");
-                                    break;
-                                case 8:
-                                    table.hideColumn("lon");
-                                    break;
-                                case 9:
-                                    table.hideColumn("alt");
-                                    break;
-                                case 10:
-                                    table.hideColumn("vel_h");
-                                    break;
-                                case 11:
-                                    table.hideColumn("vel_v");
-                                    break;
-                                case 12:
-                                    table.hideColumn("temp");
-                                    break;
-                                case 13:
-                                    table.hideColumn("humidity");
-                                    break;
-                                case 14:
-                                    table.hideColumn("azimuth");
-                                    break;
-                                case 15:
-                                    table.hideColumn("elevation");
-                                    break;
-                                case 16:
-                                    table.hideColumn("range");
-                                    break;
-                                case 17:
-                                    table.hideColumn("snr");
-                                    break;
-                                case 18:
-                                    table.hideColumn("other");
-                                    break;
+                    } else if (show == 'true') {
+                        document.getElementById("checkbox" + i).checked = true;
+                    } else {
+                        if ($( window ).width() > 1200) {
+                            document.getElementById("checkbox" + i).checked = true;
+                        } else { // If no cookies are set on mobile device show limited number for better experience.
+                            if ([1,4,9,16].includes(i)) {
+                                setCookie("col" + i, 'true', 365);
+                                document.getElementById("checkbox" + i).checked = true;
+                            }
+                            if ([0,2,3,5,6,7,8,10,11,12,13,14,15,17,18].includes(i)) {
+                                setCookie("col" + i, 'false', 365);
+                                document.getElementById("checkbox" + i).checked = false;
+                                switch(i) {
+                                    case 0:
+                                        table.hideColumn("sdr_device_idx");
+                                        break;
+                                    case 1:
+                                        table.hideColumn("age");
+                                        break;
+                                    case 2:
+                                        table.hideColumn("type");
+                                        break;
+                                    case 3:
+                                        table.hideColumn("freq");
+                                        break;
+                                    case 4:
+                                        table.hideColumn("id");
+                                        break;
+                                    case 5:
+                                        table.hideColumn("datetime");
+                                        break;
+                                    case 6:
+                                        table.hideColumn("frame");
+                                        break;
+                                    case 7:
+                                        table.hideColumn("lat");
+                                        break;
+                                    case 8:
+                                        table.hideColumn("lon");
+                                        break;
+                                    case 9:
+                                        table.hideColumn("alt");
+                                        break;
+                                    case 10:
+                                        table.hideColumn("vel_h");
+                                        break;
+                                    case 11:
+                                        table.hideColumn("vel_v");
+                                        break;
+                                    case 12:
+                                        table.hideColumn("temp");
+                                        break;
+                                    case 13:
+                                        table.hideColumn("humidity");
+                                        break;
+                                    case 14:
+                                        table.hideColumn("azimuth");
+                                        break;
+                                    case 15:
+                                        table.hideColumn("elevation");
+                                        break;
+                                    case 16:
+                                        table.hideColumn("range");
+                                        break;
+                                    case 17:
+                                        table.hideColumn("snr");
+                                        break;
+                                    case 18:
+                                        table.hideColumn("other");
+                                        break;
+                                }
                             }
                         }
                     }
                 }
-            }
-            table.redraw();
+                table.redraw();
+            });
         });
 
         // Function to open/close left log menu along with adjusting other elements so they render correctly.
@@ -1242,14 +1314,14 @@
                 myDiv.scrollTop = 0;
                 if ((window.innerWidth/window.innerHeight) > 1) { // 350px wide on desktop.
                     x.style.display = "none";
-                    if (getCookie('map') == true || document.getElementById("showmapbutton").checked == true) {
+                    if (getCookie('map') == true || document.getElementById("mapid_details").hasAttribute("open")) {
                         y.style.display = "block";
                     }
                     document.getElementById("mySidenav").style.width = "350px";
                     document.getElementById("main").style.marginLeft = "350px";
                     document.getElementById("mySidenav").style.borderRadius = "0px 25px 25px 0px";
                     mymap.invalidateSize();
-                    setTimeout(scan_chart_obj.resize,500);
+                    scan_chart_obj.flush();
                 } else { // Fullsize on mobile.
                     x.style.display = "block";
                     y.style.display = "none";
@@ -1259,13 +1331,13 @@
                 }
             } else {
                 x.style.display = "none";
-                if (getCookie('map') == true || document.getElementById("showmapbutton").checked == true) {
+                if (getCookie('map') == true || document.getElementById("mapid_details").hasAttribute("open")) {
                     y.style.display = "block";
                 }
                 document.getElementById("mySidenav").style.width = 0;
                 document.getElementById("main").style.marginLeft = 0;
                 mymap.invalidateSize();
-                setTimeout(scan_chart_obj.resize,500);
+                scan_chart_obj.flush();
             }
         }
 
@@ -1274,14 +1346,14 @@
             var y = document.getElementById('mapid');
             if (document.getElementById("mySettings").style.width == "0px" || document.getElementById("mySettings").style.width == 0) {
                 if ((window.innerWidth/window.innerHeight) > 1) { // 350px wide on desktop.
-                    if (getCookie('map') == true || document.getElementById("showmapbutton").checked == true) {
+                    if (getCookie('map') == true || document.getElementById("mapid_details").hasAttribute("open")) {
                         y.style.display = "block";
                     }
                     document.getElementById("mySettings").style.width = "350px";
                     document.getElementById("main").style.marginRight = "350px";
                     document.getElementById("mySettings").style.borderRadius = "25px 0px 0px 25px";
                     mymap.invalidateSize();
-                    setTimeout(scan_chart_obj.resize,500);
+                    scan_chart_obj.flush();
                     setTimeout(showDown,500);
                 } else { // Fullsize on mobile.
                     y.style.display = "none";
@@ -1290,13 +1362,13 @@
                     document.getElementById("mySettings").style.borderRadius = "0px";
                 }
             } else {
-                if (getCookie('map') == true || document.getElementById("showmapbutton").checked == true) {
+                if (getCookie('map') == true || document.getElementById("mapid_details").hasAttribute("open")) {
                     y.style.display = "block";
                 }
                 document.getElementById("mySettings").style.width = 0;
                 document.getElementById("main").style.marginRight = 0;
                 mymap.invalidateSize();
-                setTimeout(scan_chart_obj.resize,500);
+                scan_chart_obj.flush();
                 setTimeout(showDown,500);
             }
         }
@@ -1309,50 +1381,12 @@
             }
         }
 
-        // Show/hide map on button press and update cookies.
-        function showMap(element) {
-           if (element.checked == false) {
-             document.getElementById("mapid").style.display = "none";
-             setCookie("map", 'false', 365);
-           } else {
-             document.getElementById("mapid").style.display = "block";
-             setCookie("map", 'true', 365);
-             mymap.invalidateSize();
-           }
-        }
-
-        // Show/hide scan chart on button press and update cookies.
-        function showScan(element) {
-           if (element.checked == false) {
-             document.getElementById("scanid").style.display = "none";
-             setCookie("scan", 'false', 365);
-             mymap.invalidateSize();
-           } else {
-             document.getElementById("scanid").style.display = "block";
-             setCookie("scan", 'true', 365);
-             mymap.invalidateSize();
-             redraw_scan_chart();
-             setTimeout(scan_chart_obj.resize,500);
-           }
-        }
-
         // Enable/disable auto follow on button press and update cookies.
         function autoFollow(element) {
            if (element.checked == false) {
              setCookie("follow", 'false', 365);
            } else {
              setCookie("follow", 'true', 365);
-           }
-        }
-
-        // Show/hide table on button press and update cookies.
-        function showTable(element) {
-           if (element.checked == false) {
-             document.getElementById("tableid").style.display = "none";
-             setCookie("table", 'false', 365);
-           } else {
-             document.getElementById("tableid").style.display = "block";
-             setCookie("table", 'true', 365);
            }
         }
 
@@ -1470,36 +1504,6 @@
                   <label> Other</label><br><br>
               </form>
               <div style="margin-left:40px;">
-                  <h2 style="display:inline;vertical-align:middle;">Show Table</h2>
-                  &nbsp;
-                  <div style="display:inline;vertical-align:middle;">
-                  <label class="switch">
-                    <input type="checkbox" onchange="showTable(this)" id="showtablebutton">
-                    <span class="slider round"></span>
-                  </label>
-                  </div>
-                  <br>
-                  <br>
-                  <h2 style="display:inline;vertical-align:middle;">Show Scan Plot</h2>
-                  &nbsp;
-                  <div style="display:inline;vertical-align:middle;">
-                  <label class="switch">
-                    <input type="checkbox" onchange="showScan(this)" id="showscanbutton">
-                    <span class="slider round"></span>
-                  </label>
-                  </div>
-                  <br>
-                  <br>
-                  <h2 style="display:inline;vertical-align:middle;">Show Map</h2>
-                  &nbsp;
-                  <div style="display:inline;vertical-align:middle;">
-                  <label class="switch">
-                    <input type="checkbox" onchange="showMap(this)" id="showmapbutton">
-                    <span class="slider round"></span>
-                  </label>
-                  </div>
-                  <br>
-                  <br>
                   <h2 style="display:inline;vertical-align:middle;">Dark Mode</h2>
                   &nbsp;
                   <div style="display:inline;vertical-align:middle;">
@@ -1534,6 +1538,7 @@
                     <option value="8">Eight</option>
                     <option value="9">Nine</option>
                     <option value="10">Ten</option>
+                    <option value="999">All</option>
                 </select>
                   </div>
                   <br>
@@ -1571,7 +1576,7 @@
                   <h2 style="display:inline;vertical-align:middle;">Live KML</h2>
                   &nbsp;
                   <div style="display:inline;vertical-align:middle;">
-                      <button onclick="window.location.href='/rs.kml'">SHOW</button>
+                      <button onclick="window.location.href='rs.kml'">SHOW</button>
                   </div>
                   <br>
                   <br>
@@ -1592,7 +1597,7 @@
                   <h2 style="display:inline;vertical-align:middle;">Historical View</h2>
                   &nbsp;
                   <div style="display:inline;vertical-align:middle;">
-                    <button onclick="window.location.href='/historical.html'">OPEN</button>
+                    <button onclick="window.location.href='historical.html'">OPEN</button>
                   </div>
                   <br>
                   <br>
@@ -1611,16 +1616,23 @@
         </div>
         <span style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);" id="footertext"></span>
         <p style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">Station: <span id="station_callsign">???</span></p>
-        <p style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">Current Task: <span id="task_status">???</span></p>
-        <div id="tableid">
+        <details id="tasking" style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">
+            <summary id="summary_element">Tasking: <span id="task_summary"></span></summary>
+            <span id="task_details"></span>
+        </details>
+        <details id="tableid" style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">
+            <summary id="summary_element_telem_table">Telemetry</summary>
             <div id="telem_table"></div>
-        </div>
-        <div id="scanid">
-            <h2>Scan Results</h2>
+        </details>
+        <details id="scanid" style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">
+            <summary id="summary_element_scan_plot">Scan Plot</summary>
             <div id='scan_results'>No scan data yet...</div>
             <div id="scan_chart" style="width:100%;"></div>
-        </div>
+        </details>
         <br>
+        <details id="mapid_details" style="font-size:2vh;font-size:calc(var(--vh, 1vh) * 2);">
+            <summary id="summary_element_map">Map</summary>
+        </details>
         <div id="mapid"></div>
         <i id="myBtn1" onclick="changeSettings()" class="icon-cog" style="font-size:4vh;font-size:calc(var(--vh, 1vh) * 4);"></i>
         <a href="historical.html" id="myBtn2"><i class="icon-history" style="font-size:4vh;font-size:calc(var(--vh, 1vh) * 4);"></i></a>
@@ -1636,7 +1648,7 @@
         <div class="modal-body">
           <div id="password-field">
             <span id="password-header"><h2>No Password Entered</h2></span>
-            <input style="display:inline;vertical-align:middle;" type="text" id="password-input" placeholder="Password" >
+            <input style="display:inline;vertical-align:middle;" type="password" id="password-input" placeholder="Password" >
             <div style="display:inline;vertical-align:middle;">
               <button id="verify-password" onclick="verify_password();$('#password-input').val('');">Submit</button>
             </div>
@@ -1654,10 +1666,14 @@
                 <option value="LMS6">LMS6 (400 MHz)</option>
                 <option value="MK2LMS">LMS6 (1680 MHz)</option>
                 <option value="IMET">iMet-4</option>
+                <option value="IMETWIDE">iMet-1/4 Wideband</option>
                 <option value="IMET5">iMet-50/54</option>
                 <option value="MEISEI">iMS-100</option>
                 <option value="MRZ">MRZ-H1</option>
                 <option value="MTS01">MTS01</option>
+                <option value="WXR301">WXR301</option>
+                <option value="WXRPN9">WXR301 (PN9 variant)</option>
+                <option value="RD94RD41">RD94/RD41 Dropsonde</option>
             </select>
             <div style="display:inline;vertical-align:middle;">
                 <button id="start-decoder" onclick="start_decoder();">Start</button>
@@ -1670,6 +1686,9 @@
             <div style="display:inline;vertical-align:middle;">
                 <button id="stop-decoder" onclick="stop_decoder();">Stop</button>
             </div>
+            <div style="display:inline;vertical-align:middle;">
+                <button id="stop-decoder-lockout" onclick="stop_decoder_lockout();">Temp Block</button>
+            </div>
             <h2>Scanner Control</h2>
             <p>Scanner</p>
             <div style="display:inline;vertical-align:middle;">
@@ -1677,6 +1696,21 @@
             </div>
             <div style="display:inline;vertical-align:middle;">
                 <button id="disable-scanner" onclick="disable_scanner();">Disable</button>
+            </div>
+            <br>
+            <div id="rotatorControlForm">
+                <h2>Rotator Control</h2>
+                <p>Go To Position</p>
+                <input style="display:inline;vertical-align:middle;" type="text" id="azimuth-input" placeholder="Azimuth (degrees)">
+                <input style="display:inline;vertical-align:middle;" type="text" id="elevation-input" placeholder="Elevation (degrees)">
+                <div style="display:inline;vertical-align:middle;">
+                    <button id="move-rotator" onclick="move_rotator();">Move</button>
+                </div>
+                <br>
+                <div style="display:inline;vertical-align:middle;">
+                    <button id="home-rotator" onclick="home_rotator();">Home Rotator</button>
+                </div>
+                <br>
             </div>
           </div>
         </div>

@@ -60,3 +60,11 @@
 .icon-cog:before { content: '\e802'; } /* '' */
 .icon-angle-down:before { content: '\f107'; } /* '' */
 .icon-history:before { content: '\f1da'; } /* '' */
+
+.sdrinfo-element {
+	display: inline-block;
+	margin: 0.1em;
+	padding: 0.1em 0.2em;	
+	border: 2px solid rgb(135, 135, 135);
+	border-radius: 4px;
+}

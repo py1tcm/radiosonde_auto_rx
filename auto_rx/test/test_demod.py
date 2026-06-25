@@ -209,7 +209,18 @@ processing_type = {
     },
     'rs41_fsk_demod_soft_centre': {
         # Keep signal centred.
-        'demod' : "| csdr convert_f_s16 | ./tsrc - - 0.500 |  ../fsk_demod --cs16 -b -10000 -u 10000 -s --stats=5 2 48000 4800 - - 2>stats.txt |",
+        'demod' : "| csdr convert_f_s16 | ./tsrc - - 0.500 |  ../fsk_demod --cs16 -b -10000 -u 10000 -s --mask 4800 --stats=5 2 48000 4800 - - 2>stats.txt |",
+
+        # Decode using rs41ecc
+        'decode': "../rs41mod --ecc --ptu --crc --softin -i --json 2>/dev/null",
+        # Count the number of telemetry lines.
+        "post_process" : " | grep frame | wc -l",
+        'files' : "./generated/rs41*"
+    },
+    'rs41_fsk_demod_soft_centre_optimised': {
+        # Tweaking some of the modem parameters for a little bit more performance
+        # Keep signal centred.
+        'demod' : "| csdr convert_f_s16 | ./tsrc - - 0.500 |  ../fsk_demod --cs16 -b -10000 -u 10000 -s --nsym=300 -p 5 --mask 4800 --stats=5 2 48000 4800 - - 2>stats.txt |",
 
         # Decode using rs41ecc
         'decode': "../rs41mod --ecc --ptu --crc --softin -i --json 2>/dev/null",
@@ -270,6 +281,32 @@ processing_type = {
     'm10_fsk_demod_soft_centre': {
         # Shift up to ~24 khz, and then pass into fsk_demod.
         'demod' : "| csdr convert_f_s16 | ../tsrc - - 0.50083333333 -c | ../fsk_demod --cs16 -b -10000 -p 5 -u 10000 -s --stats=5 2 48080 9616 - - 2>stats.txt |",
+        'decode': "../m10mod --json --softin -i -vvv 2>/dev/null",
+        # Count the number of telemetry lines.
+        "post_process" : "| grep aprsid | wc -l",
+        'files' : "./generated/m10*"
+    },
+    'm10_fsk_demod_soft_centre_48000': {
+        # Shift up to ~24 khz, and then pass into fsk_demod.
+        'demod' : "| csdr convert_f_s16 | ../tsrc - - 0.500 -c | ../fsk_demod --cs16 -b -10000 -p 5 -u 10000 -s --stats=5 2 48000 9600 - - 2>stats.txt |",
+        'decode': "../m10mod --json --softin -i -vvv 2>/dev/null",
+        # Count the number of telemetry lines.
+        "post_process" : "| grep aprsid | wc -l",
+        'files' : "./generated/m10*"
+    },
+
+    'm10_fsk_demod_soft_centre_48000_2': {
+        # Shift up to ~24 khz, and then pass into fsk_demod.
+        'demod' : "| csdr convert_f_s16 | ../tsrc - - 0.500 -c | ../fsk_demod --cs16 -b -10000 -p 5 -u 10000 -s --stats=5 2 48080 9616 - - 2>stats.txt |",
+        'decode': "../m10mod --json --softin -i -vvv 2>/dev/null",
+        # Count the number of telemetry lines.
+        "post_process" : "| grep aprsid | wc -l",
+        'files' : "./generated/m10*"
+    },
+
+    'm10_fsk_demod_soft_centre_96200': {
+        # Shift up to ~24 khz, and then pass into fsk_demod.
+        'demod' : "| csdr convert_f_s16 | ../tsrc - - 1.0020833333333334 -c | ../fsk_demod --cs16 -b -10000 -p 10 -u 10000 -s --stats=5 2 96200 9620 - - 2>stats.txt |",
         'decode': "../m10mod --json --softin -i -vvv 2>/dev/null",
         # Count the number of telemetry lines.
         "post_process" : "| grep aprsid | wc -l",
@@ -609,38 +646,6 @@ processing_type['imet4_rtlfm'] = {
     # Count the number of telemetry lines.
     "post_process" : "| grep frame |  wc -l",
     'files' : "./generated/imet4*.bin"
-}
-
-
-# LMS6 - 400 MHz version
-_fm_rate = 22000
-# Calculate the necessary conversions
-_rtlfm_oversampling = 8.0 # Viproz's hacked rtl_fm oversamples by 8x.
-_shift = -2.0*_fm_rate/_sample_fs # rtl_fm tunes 'up' by rate*2, so we need to shift the signal down by this amount.
-
-_resample = (_fm_rate*_rtlfm_oversampling)/_sample_fs
-
-if _resample != 1.0:
-    # We will need to resample.
-    _resample_command = "csdr convert_f_s16 | ./tsrc - - %.4f | csdr convert_s16_f |" % _resample
-    _shift = (-2.0*_fm_rate)/(_sample_fs*_resample)
-else:
-    _resample_command = ""
-
-_demod_command = "| %s csdr shift_addition_cc %.5f 2>/dev/null | csdr convert_f_u8 |" % (_resample_command, _shift)
-_demod_command += " ./rtl_fm_stdin -M fm -f 401000000 -F9 -s %d  2>/dev/null|" % (int(_fm_rate))
-_demod_command += " sox -t raw -r %d -e s -b 16 -c 1 - -r 48000 -b 8 -t wav - highpass 20 2>/dev/null |" % int(_fm_rate)
-
-
-processing_type['lms6-400_rtlfm'] = {
-    'demod': _demod_command,
-    # Decode using rs92ecc
-    'decode': "../lms6mod  2>/dev/null",
-    #'decode': "../rs92ecc -vx -v --crc --ecc -r --vel 2>/dev/null", # For measuring No-ECC performance
-    # Count the number of telemetry lines.
-    "post_process" : " | wc -l",
-    #"post_process" : " | grep \"errors: 0\" | wc -l",
-    'files' : "./generated/lms6-400*.bin" 
 }
 
 
